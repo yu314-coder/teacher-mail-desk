@@ -14,6 +14,7 @@ const LOGGER_SHEETS = {
   users: { name: 'Users', headers: ['accountName', 'email', 'salt', 'passwordHash', 'status', 'createdAt', 'lastLoginAt'] },
   sessions: { name: 'Sessions', headers: ['sessionHash', 'email', 'createdAt', 'expiresAt', 'lastUsedAt', 'status'] },
   threads: { name: 'AllowedThreads', headers: ['email', 'threadId', 'recipient', 'createdAt', 'lastSeenAt', 'status'] },
+  allowedSenders: { name: 'AllowedSenders', headers: ['email', 'status', 'addedAt', 'notes'] },
   audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason'] },
   messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result'] },
   authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt'] },
@@ -91,6 +92,7 @@ function handleOperation_(operation, payload) {
     case 'authorize': return authorize_(payload);
     case 'recordThread': return recordThread_(payload);
     case 'listThreads': return listThreads_(payload);
+    case 'listAllowedSenders': return listAllowedSenders_(payload);
     case 'audit': return recordAudit_(payload);
     case 'messageAudit': return messageAudit_(payload);
     default: throw new Error('Unknown logger operation.');
@@ -246,6 +248,30 @@ function listThreads_(payload) {
     .slice(-100)
     .reverse()
     .map((row) => ({ threadId: row.threadId, recipient: row.recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt }));
+}
+
+function listAllowedSenders_(payload) {
+  // The portal supplies its owner account email with every logger call. This
+  // keeps the operation tied to the configured backend identity while the
+  // actual allowlist remains manually editable in Google Sheets.
+  normalizedEmail_(payload.email);
+  const seen = {};
+  return readRows_(sheetFor_('allowedSenders'))
+    .filter((row) => allowedSenderStatus_(row.status))
+    .map((row) => senderEmail_(row.email))
+    .filter((email) => email && !seen[email] && (seen[email] = true));
+}
+
+function allowedSenderStatus_(value) {
+  const status = String(value || '').trim().toLowerCase();
+  return status !== 'inactive' && status !== 'disabled' && status !== 'removed' && status !== 'blocked';
+}
+
+function senderEmail_(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/<([^>]+)>/);
+  const email = (match ? match[1] : raw).trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254 ? email : '';
 }
 
 function recordAudit_(payload) {

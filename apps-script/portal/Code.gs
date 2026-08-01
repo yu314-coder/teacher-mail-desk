@@ -159,13 +159,14 @@ function signOut(sessionToken) {
 
 function listManagedThreads(sessionToken) {
   const email = requireSession_(sessionToken);
+  const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
   const allowed = loggerCall_('listThreads', { email }).slice(0, PORTAL.maxThreads);
   ensureManagedLabel_();
   const result = [];
   allowed.forEach((record) => {
     try {
       const thread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
-      const view = threadView_(thread, email, record);
+      const view = threadView_(thread, email, record, allowedSenders);
       result.push(view);
       (view.messages || []).filter((message) => !message.blocked && message.body).forEach((message) => {
         recordMessageAudit_(email, 'received', 'view', record.threadId, message.id, message.from, email, message.subject, message.body, []);
@@ -213,6 +214,10 @@ function replyToThread(sessionToken, threadId, body, attachments) {
 
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
   const inbound = latestInbound_(thread, email);
+  if (inbound && !allowedSendersFor_(email).has(addressFrom_(header_(inbound, 'From')))) {
+    recordAudit_(email, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
+    throw new Error('This sender is not on the AllowedSenders list.');
+  }
   const recipient = inbound ? addressFrom_(header_(inbound, 'From')) : record.recipient.split(',')[0].trim();
   if (!recipient || !isEmail_(recipient)) throw new Error('No safe reply recipient was found.');
   const source = inbound || (thread.messages || []).slice(-1)[0];
@@ -244,6 +249,11 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
   const source = (thread.messages || []).find((message) => String(message.id || '') === cleanText_(messageId, 160));
   if (!source) throw new Error('The selected message could not be found.');
+  const sourceFrom = addressFrom_(header_(source, 'From'));
+  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email).has(sourceFrom)) {
+    recordAudit_(email, 'forward', id, source.id || '', 'blocked', 'Inbound sender is not on AllowedSenders.');
+    throw new Error('This sender is not on the AllowedSenders list.');
+  }
   const sourceSubject = header_(source, 'Subject') || 'Teacher Mail Desk conversation';
   const sourceBody = plainBody_(source.payload);
   if (!sourceBody || hasAttachment_(source.payload) || hasFinancialPattern_(sourceSubject + '\n' + sourceBody)) {
@@ -374,8 +384,13 @@ function addManagedLabel_(threadId) {
   Gmail.Users.Threads.modify({ addLabelIds: [labelId] }, 'me', threadId);
 }
 
-function threadView_(thread, email, record) {
-  const messages = (thread.messages || []).map((message) => messageView_(message, email));
+function threadView_(thread, email, record, allowedSenders) {
+  const messages = (thread.messages || [])
+    .filter((message) => {
+      const from = addressFrom_(header_(message, 'From'));
+      return !from || from === email || allowedSenders.has(from);
+    })
+    .map((message) => messageView_(message, email));
   const visible = messages.filter((message) => !message.blocked && message.body);
   const lastVisible = visible.length ? visible[visible.length - 1] : null;
   return {
@@ -415,6 +430,10 @@ function latestInbound_(thread, accountEmail) {
     const from = addressFrom_(header_(message, 'From'));
     return from && from.toLowerCase() !== accountEmail.toLowerCase();
   }) || null;
+}
+
+function allowedSendersFor_(email) {
+  return new Set(loggerCall_('listAllowedSenders', { email }));
 }
 
 function rawMessage_(recipients, subject, body, extraHeaders, attachments) {

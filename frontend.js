@@ -288,23 +288,26 @@ $('registerForm').addEventListener('submit', (event) => {
 });
 $('composeForm').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     const attachments = await readAttachments($('composeFiles'));
-    handleSend(event.currentTarget, 'sendMessage', [$('composeTo').value, $('composeSubject').value, $('composeBody').value, attachments], 'Message sent. It is now a managed conversation.', 'Sending…');
+    handleSend(form, 'sendMessage', [$('composeTo').value, $('composeSubject').value, $('composeBody').value, attachments], 'Message sent. It is now a managed conversation.', 'Sending…');
   } catch (error) { showAlert(messageText(error)); }
 });
 $('replyForm').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     const attachments = await readAttachments($('replyFiles'));
-    handleSend(event.currentTarget, 'replyToThread', [selectedThreadId, $('replyBody').value, attachments], 'Reply sent through the managed Gmail backend.', 'Sending reply…');
+    handleSend(form, 'replyToThread', [selectedThreadId, $('replyBody').value, attachments], 'Reply sent through the managed Gmail backend.', 'Sending reply…');
   } catch (error) { showAlert(messageText(error)); }
 });
 $('forwardForm').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     const attachments = await readAttachments($('forwardFiles'));
-    handleSend(event.currentTarget, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through the managed Gmail backend.', 'Forwarding…');
+    handleSend(form, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through the managed Gmail backend.', 'Forwarding…');
   } catch (error) { showAlert(messageText(error)); }
 });
 $('refreshButton').addEventListener('click', loadThreads);
