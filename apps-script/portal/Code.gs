@@ -29,19 +29,15 @@ function doGet() {
 function doPost(e) {
   try {
     const parameters = e && e.parameter ? e.parameter : {};
-    const expectedEmail = String(parameters.email || '').trim().toLowerCase();
-    const actualEmail = activeEmail_();
-    if (expectedEmail && expectedEmail !== actualEmail) {
-      throw new Error('The email must match the signed-in Google account.');
-    }
+    activeEmail_();
 
     const action = String(parameters.action || '').trim().toLowerCase();
     if (action === 'signin') {
-      signIn(parameters.password, parameters.accessCode);
+      signIn(parameters.accountName, parameters.password, parameters.accessCode);
       return postRedirect_('signin');
     }
     if (action === 'signup') {
-      signUp(parameters.displayName, parameters.password, parameters.accessCode);
+      signUp(parameters.accountName, parameters.password, parameters.accessCode);
       return postRedirect_('signup');
     }
     throw new Error('Unknown account action.');
@@ -96,19 +92,20 @@ function getAppState() {
   }
 }
 
-function signUp(displayName, password, accessCode) {
+function signUp(accountName, password, accessCode) {
   const email = activeEmail_();
-  validateAccountInputs_(displayName, password, accessCode);
-  const result = loggerCall_('register', { email, displayName, password, accessCode });
+  validateAccountInputs_(accountName, password, accessCode);
+  const result = loggerCall_('register', { email, accountName, password, accessCode });
   saveSession_(result.sessionToken);
   return { ok: true, email, expiresAt: result.expiresAt };
 }
 
-function signIn(password, accessCode) {
+function signIn(accountName, password, accessCode) {
   const email = activeEmail_();
-  if (!password || String(password).length < 12) throw new Error('Use the password created for this teacher portal account.');
-  if (!accessCode || String(accessCode).length < 12) throw new Error('Enter the administrator access code.');
-  const result = loggerCall_('login', { email, password: String(password), accessCode: String(accessCode) });
+  if (!String(accountName || '').trim()) throw new Error('Enter the account name.');
+  if (!password || String(password).length < 6) throw new Error('Use a password with at least 6 characters.');
+  if (!accessCode || String(accessCode).length < 4) throw new Error('Enter the administrator access code.');
+  const result = loggerCall_('login', { email, accountName: String(accountName), password: String(password), accessCode: String(accessCode) });
   saveSession_(result.sessionToken);
   return { ok: true, email, expiresAt: result.expiresAt };
 }
@@ -126,7 +123,11 @@ function listManagedThreads() {
   allowed.forEach((record) => {
     try {
       const thread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
-      result.push(threadView_(thread, email, record));
+      const view = threadView_(thread, email, record);
+      result.push(view);
+      (view.messages || []).filter((message) => !message.blocked && message.body).forEach((message) => {
+        recordMessageAudit_(email, 'received', 'view', record.threadId, message.id, message.from, email, message.subject, message.body, []);
+      });
     } catch (error) {
       // A deleted or inaccessible thread remains in the audit log but is not
       // allowed to break the rest of the inbox.
@@ -152,6 +153,7 @@ function sendMessage(to, subject, body, attachments) {
   addManagedLabel_(sent.threadId);
   loggerCall_('recordThread', { email, threadId: sent.threadId, recipient: recipients.join(', ') });
   recordAudit_(email, 'send', sent.threadId, sent.id || '', 'success', '');
+  recordMessageAudit_(email, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, recipients, cleanSubject, cleanBody, sent, safeAttachments);
   return { ok: true, sent: true };
 }
@@ -185,6 +187,7 @@ function replyToThread(threadId, body, attachments) {
   addManagedLabel_(id);
   loggerCall_('recordThread', { email, threadId: id, recipient: record.recipient });
   recordAudit_(email, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
+  recordMessageAudit_(email, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, [recipient], replySubject, cleanBody, sent, safeAttachments);
   return { ok: true, sent: true };
 }
@@ -227,6 +230,21 @@ function recordAudit_(email, action, threadId, messageId, result, reason) {
   } catch (ignored) {
     // Do not turn a successful Gmail operation into a duplicate send because
     // an audit write was temporarily unavailable.
+  }
+}
+
+function recordMessageAudit_(email, direction, action, threadId, messageId, from, to, subject, body, attachments) {
+  if (!messageId) return;
+  const attachmentMetadata = (attachments || [])
+    .map((file) => ({ name: file.name, mimeType: file.mimeType, size: file.size }))
+    .map(JSON.stringify)
+    .join('\n');
+  try {
+    loggerCall_('messageAudit', {
+      email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result: 'success',
+    });
+  } catch (ignored) {
+    // Message delivery/read access remains independent of a temporary audit-write outage.
   }
 }
 
@@ -448,11 +466,11 @@ function header_(message, name) {
   return header ? String(header.value || '') : '';
 }
 
-function validateAccountInputs_(displayName, password, accessCode) {
+function validateAccountInputs_(accountName, password, accessCode) {
   if (!activeEmail_()) throw new Error('Sign in to the teacher Google account first.');
-  if (!String(displayName || '').trim()) throw new Error('Enter the teacher name.');
-  if (String(password || '').length < 12) throw new Error('Use a password with at least 12 characters.');
-  if (String(accessCode || '').length < 12) throw new Error('Enter the access code supplied by the administrator.');
+  if (!String(accountName || '').trim()) throw new Error('Enter the account name.');
+  if (String(password || '').length < 6) throw new Error('Use a password with at least 6 characters.');
+  if (String(accessCode || '').length < 4) throw new Error('Enter the access code supplied by the administrator.');
 }
 
 function saveSession_(token) { userProperties_().setProperty(PORTAL.sessionProperty, String(token)); }

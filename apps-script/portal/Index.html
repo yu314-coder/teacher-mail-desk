@@ -122,26 +122,24 @@
             <button id="signup-tab" class="tab" type="button">Create account</button>
           </div>
           <form id="signin-form">
-            <label for="signin-email">Google account</label>
-            <input id="signin-email" type="email" readonly placeholder="Loading Google account…">
+            <label for="signin-account-name">Account name</label>
+            <input id="signin-account-name" type="text" autocomplete="username" required>
             <label for="signin-password">Portal password</label>
-            <input id="signin-password" type="password" minlength="12" autocomplete="current-password" required>
+            <input id="signin-password" type="password" minlength="6" autocomplete="current-password" required>
             <label for="signin-access-code">Access code</label>
-            <input id="signin-access-code" type="password" minlength="12" autocomplete="one-time-code" required>
+            <input id="signin-access-code" type="password" minlength="4" autocomplete="one-time-code" required>
             <div class="form-actions"><button class="button button-primary" type="submit">Sign in securely</button></div>
-            <p class="helper">The Google account, portal password, and access code are checked before the mailbox is opened. Passwords and codes are never stored as plain text.</p>
+            <p class="helper">The account name, password, access code, and the teacher’s Google authorization are checked before the mailbox is opened. Passwords and codes are never stored as plain text.</p>
           </form>
           <form id="signup-form" hidden>
-            <label for="signup-email">Google account</label>
-            <input id="signup-email" type="email" readonly placeholder="Loading Google account…">
-            <label for="display-name">Teacher name</label>
-            <input id="display-name" type="text" maxlength="80" autocomplete="name" required>
+            <label for="signup-account-name">Account name</label>
+            <input id="signup-account-name" type="text" maxlength="80" autocomplete="username" required>
             <label for="signup-password">Create portal password</label>
-            <input id="signup-password" type="password" minlength="12" autocomplete="new-password" required>
+            <input id="signup-password" type="password" minlength="6" autocomplete="new-password" required>
             <label for="access-code">Invitation access code</label>
-            <input id="access-code" type="password" minlength="12" autocomplete="one-time-code" required>
+            <input id="access-code" type="password" minlength="4" autocomplete="one-time-code" required>
             <div class="form-actions"><button class="button button-primary" type="submit">Create protected account</button></div>
-            <p class="helper">Use a unique password. The invitation code is only checked during registration and is not saved in the Sheet.</p>
+            <p class="helper">The account name is linked to the signed-in teacher Google account. The access code is checked but never saved in the Sheet.</p>
           </form>
         </section>
 
@@ -252,14 +250,10 @@
 
       function renderState(state) {
         if (!state || !state.ok) {
-          $('signin-email').value = '';
-          $('signup-email').value = '';
           showNotice('auth-notice', state && state.message ? state.message : 'Open this portal while signed in to the teacher Google account.', false);
           return;
         }
         currentEmail = state.email;
-        $('signin-email').value = currentEmail;
-        $('signup-email').value = currentEmail;
         if (state.authenticated) openDashboard();
         else if (!state.registered) switchAuthTab('signup');
       }
@@ -329,12 +323,12 @@
       $('signin-form').addEventListener('submit', (event) => {
         event.preventDefault();
         const button = event.submitter; setBusy(button, true, 'Signing in…'); showNotice('auth-notice', '', false);
-        rpc('signIn', [$('signin-password').value, $('signin-access-code').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
+        rpc('signIn', [$('signin-account-name').value, $('signin-password').value, $('signin-access-code').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
       });
       $('signup-form').addEventListener('submit', (event) => {
         event.preventDefault();
         const button = event.submitter; setBusy(button, true, 'Creating account…'); showNotice('auth-notice', '', false);
-        rpc('signUp', [$('display-name').value, $('signup-password').value, $('access-code').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
+        rpc('signUp', [$('signup-account-name').value, $('signup-password').value, $('access-code').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
       });
       $('compose-form').addEventListener('submit', async (event) => {
         event.preventDefault();

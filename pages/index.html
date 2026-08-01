@@ -16,16 +16,16 @@
         <form id="loginForm" method="post" target="_top">
           <input type="hidden" name="action" value="signin" />
           <div class="form-group">
-            <label for="loginEmail">Google account email:</label>
-            <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+            <label for="loginAccountName">Account name:</label>
+            <input id="loginAccountName" name="accountName" type="text" autocomplete="username" required />
           </div>
           <div class="form-group">
             <label for="loginPassword">Portal password:</label>
-            <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="12" required />
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="6" required />
           </div>
           <div class="form-group">
             <label for="loginAccessCode">Access code:</label>
-            <input id="loginAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="12" required />
+            <input id="loginAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
           </div>
           <div class="button-group">
             <button type="submit">Login</button>
@@ -40,20 +40,16 @@
         <form id="registerForm" method="post" target="_top">
           <input type="hidden" name="action" value="signup" />
           <div class="form-group">
-            <label for="registerName">Teacher name:</label>
-            <input id="registerName" name="displayName" type="text" autocomplete="name" required />
-          </div>
-          <div class="form-group">
-            <label for="registerEmail">Google account email:</label>
-            <input id="registerEmail" name="email" type="email" autocomplete="email" required />
+            <label for="registerAccountName">Account name:</label>
+            <input id="registerAccountName" name="accountName" type="text" autocomplete="username" required />
           </div>
           <div class="form-group">
             <label for="registerPassword">Create portal password:</label>
-            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="12" required />
+            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="6" required />
           </div>
           <div class="form-group">
             <label for="registerAccessCode">Access code:</label>
-            <input id="registerAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="12" required />
+            <input id="registerAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
           </div>
           <div class="button-group">
             <button type="submit">Register</button>
@@ -62,11 +58,11 @@
         </form>
       </section>
 
-      <p class="security-note">The secure Apps Script portal verifies the Google account, password, and access code. GitHub Pages never stores credentials in a Sheet or repository.</p>
+      <p class="security-note">The secure Apps Script portal verifies the account name, password, access code, and the teacher’s own Google authorization. GitHub Pages never stores credentials in a Sheet or repository.</p>
     </main>
 
     <script>
-      const APP_SCRIPT_URL = "https://script.google.com/macros/s/REPLACE_WITH_PORTAL_DEPLOYMENT_ID/exec";
+      const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxsGA4I2OXwmDNISLNTRx9rDYooIVqCq_hjOPhfwsQo-kWr6Y9VFb3ChDuVEBZ6Z98/exec";
       const alertContainer = document.getElementById("alertContainer");
 
       function showAlert(message, type = "error") {

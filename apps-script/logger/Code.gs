@@ -5,15 +5,18 @@
  * anyone (anonymous). It is only callable by the teacher portal's server-side
  * UrlFetchApp request because every request must include LOGGER_SECRET.
  *
- * The logger deliberately never accepts message subjects, message bodies,
- * attachments, Gmail tokens, or plaintext passwords for storage.
+ * The logger stores only privacy-filtered message text from portal-handled
+ * messages. It never stores attachment bytes, Gmail tokens, or plaintext
+ * passwords/access codes.
  */
 
 const LOGGER_SHEETS = {
-  users: { name: 'Users', headers: ['email', 'displayName', 'salt', 'passwordHash', 'status', 'createdAt', 'lastLoginAt'] },
+  users: { name: 'Users', headers: ['accountName', 'email', 'salt', 'passwordHash', 'status', 'createdAt', 'lastLoginAt'] },
   sessions: { name: 'Sessions', headers: ['sessionHash', 'email', 'createdAt', 'expiresAt', 'lastUsedAt', 'status'] },
   threads: { name: 'AllowedThreads', headers: ['email', 'threadId', 'recipient', 'createdAt', 'lastSeenAt', 'status'] },
   audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason'] },
+  messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result'] },
+  authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt'] },
 };
 
 /**
@@ -31,8 +34,8 @@ function initializeLogger() {
   if (!sheetId || !accessCode) {
     throw new Error('Set SETUP_SHEET_ID and SETUP_ACCESS_CODE in Project Settings first.');
   }
-  if (accessCode.length < 12) {
-    throw new Error('SETUP_ACCESS_CODE must be at least 12 characters.');
+  if (accessCode.length < 4) {
+    throw new Error('SETUP_ACCESS_CODE must be at least 4 characters.');
   }
 
   const accessSalt = Utilities.getUuid();
@@ -81,25 +84,26 @@ function handleOperation_(operation, payload) {
     case 'recordThread': return recordThread_(payload);
     case 'listThreads': return listThreads_(payload);
     case 'audit': return recordAudit_(payload);
+    case 'messageAudit': return messageAudit_(payload);
     default: throw new Error('Unknown logger operation.');
   }
 }
 
 function sessionState_(payload) {
   const email = normalizedEmail_(payload.email);
-  const user = findUser_(email);
+  const user = findUserByEmail_(email);
   return { registered: Boolean(user && user.status === 'active') };
 }
 
 function register_(payload) {
+  const accountName = normalizedAccountName_(payload.accountName);
   const email = normalizedEmail_(payload.email);
-  const displayName = cleanText_(payload.displayName, 80);
   const password = String(payload.password || '');
   const accessCode = String(payload.accessCode || '');
-  if (!displayName) throw new Error('A display name is required.');
-  if (password.length < 12) throw new Error('Use a password with at least 12 characters.');
-  if (accessCode.length < 12) throw new Error('The access code is invalid.');
-  if (findUser_(email)) throw new Error('This Google account is already registered.');
+  if (password.length < 6) throw new Error('Use a password with at least 6 characters.');
+  if (accessCode.length < 4) throw new Error('The access code is invalid.');
+  if (findUserByAccountName_(accountName)) throw new Error('This account name is already registered.');
+  if (findUserByEmail_(email)) throw new Error('This Google account is already registered.');
   const props = PropertiesService.getScriptProperties();
   if (hash_(accessCode, String(props.getProperty('ACCESS_CODE_SALT') || '')) !== props.getProperty('ACCESS_CODE_HASH')) {
     throw new Error('The access code is invalid.');
@@ -108,28 +112,78 @@ function register_(payload) {
   const salt = Utilities.getUuid();
   const passwordHash = hash_(password, salt);
   const sheet = sheetFor_('users');
-  sheet.appendRow([email, displayName, salt, passwordHash, 'active', new Date(), '']);
+  sheet.appendRow([accountName, email, salt, passwordHash, 'active', new Date(), '']);
+  sheetFor_('audit').appendRow([new Date(), email, 'register', '', '', 'success', '']);
   return createSession_(email);
 }
 
 function login_(payload) {
+  const accountName = normalizedAccountName_(payload.accountName);
   const email = normalizedEmail_(payload.email);
   const password = String(payload.password || '');
   const accessCode = String(payload.accessCode || '');
-  const user = findUser_(email);
-  if (!user || user.status !== 'active') throw new Error('No active portal account exists for this Google account.');
-  if (hash_(password, user.salt) !== user.passwordHash) throw new Error('The password is incorrect.');
-  verifyAccessCode_(accessCode);
+  enforceLoginRateLimit_(email);
+  const user = findUserByAccountName_(accountName);
+  if (!user || user.email !== email || user.status !== 'active') {
+    recordLoginFailure_(email);
+    throw new Error('No active account exists for this account name and Google account.');
+  }
+  if (password.length < 6) {
+    recordLoginFailure_(email);
+    throw new Error('The password is incorrect.');
+  }
+  if (hash_(password, user.salt) !== user.passwordHash) {
+    recordLoginFailure_(email);
+    throw new Error('The password is incorrect.');
+  }
+  try {
+    verifyAccessCode_(accessCode);
+  } catch (error) {
+    recordLoginFailure_(email);
+    throw error;
+  }
+  clearLoginFailures_(email);
   updateRow_(sheetFor_('users'), user.row, user.headers, { lastLoginAt: new Date() });
+  sheetFor_('audit').appendRow([new Date(), email, 'login', '', '', 'success', '']);
   return createSession_(email);
 }
 
 function verifyAccessCode_(accessCode) {
-  if (accessCode.length < 12) throw new Error('The access code is invalid.');
+  if (accessCode.length < 4) throw new Error('The access code is invalid.');
   const props = PropertiesService.getScriptProperties();
   if (hash_(accessCode, String(props.getProperty('ACCESS_CODE_SALT') || '')) !== props.getProperty('ACCESS_CODE_HASH')) {
     throw new Error('The access code is invalid.');
   }
+}
+
+function enforceLoginRateLimit_(email) {
+  const row = readRows_(sheetFor_('authAttempts')).find((item) => item.email === email);
+  if (row && row.lockedUntil && new Date(row.lockedUntil).getTime() > Date.now()) {
+    throw new Error('Too many failed sign-in attempts. Try again in 15 minutes.');
+  }
+}
+
+function recordLoginFailure_(email) {
+  const sheet = sheetFor_('authAttempts');
+  const existing = readRows_(sheet).find((item) => item.email === email);
+  const now = new Date();
+  const sameWindow = Boolean(existing && existing.windowStartedAt && Date.now() - new Date(existing.windowStartedAt).getTime() < 15 * 60 * 1000);
+  const windowStart = sameWindow
+    ? new Date(existing.windowStartedAt)
+    : now;
+  const count = sameWindow ? Number(existing.failedCount || 0) + 1 : 1;
+  const lockedUntil = count >= 5 ? new Date(now.getTime() + 15 * 60 * 1000) : '';
+  if (existing) {
+    updateRow_(sheet, existing.row, existing.headers, { windowStartedAt: windowStart, failedCount: count, lockedUntil, lastAttemptAt: now });
+  } else {
+    sheet.appendRow([email, windowStart, count, lockedUntil, now]);
+  }
+}
+
+function clearLoginFailures_(email) {
+  const sheet = sheetFor_('authAttempts');
+  const existing = readRows_(sheet).find((item) => item.email === email);
+  if (existing) updateRow_(sheet, existing.row, existing.headers, { failedCount: 0, lockedUntil: '', lastAttemptAt: new Date() });
 }
 
 function authorize_(payload) {
@@ -189,6 +243,34 @@ function recordAudit_(payload) {
   return { recorded: true };
 }
 
+function messageAudit_(payload) {
+  const email = normalizedEmail_(payload.email);
+  const direction = cleanText_(payload.direction, 20);
+  const action = cleanText_(payload.action, 40);
+  const threadId = cleanText_(payload.threadId, 160);
+  const messageId = cleanText_(payload.messageId, 160);
+  const from = cleanText_(payload.from, 500);
+  const to = cleanText_(payload.to, 500);
+  const subject = cleanText_(payload.subject, 180);
+  const body = cleanText_(payload.body, 48000);
+  const attachmentMetadata = cleanText_(payload.attachmentMetadata, 4000);
+  const result = cleanText_(payload.result, 40) || 'success';
+  if (!direction || !action || !threadId || !messageId) throw new Error('Message audit identifiers are required.');
+  if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentMetadata)) {
+    throw new Error('Message audit content was blocked by the privacy filter.');
+  }
+
+  const sheet = sheetFor_('messages');
+  const existing = readRows_(sheet).find((row) => row.email === email && row.messageId === messageId && row.direction === direction);
+  const values = { timestamp: new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result };
+  if (existing) {
+    updateRow_(sheet, existing.row, existing.headers, values);
+  } else {
+    sheet.appendRow([values.timestamp, values.email, values.direction, values.action, values.threadId, values.messageId, values.from, values.to, values.subject, values.body, values.attachmentMetadata, values.result]);
+  }
+  return { recorded: true };
+}
+
 function createSession_(email) {
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   const now = new Date();
@@ -197,7 +279,11 @@ function createSession_(email) {
   return { authenticated: true, sessionToken: token, expiresAt: expires.toISOString() };
 }
 
-function findUser_(email) {
+function findUserByAccountName_(accountName) {
+  return readRows_(sheetFor_('users')).find((row) => row.accountName === accountName) || null;
+}
+
+function findUserByEmail_(email) {
   return readRows_(sheetFor_('users')).find((row) => row.email === email) || null;
 }
 
@@ -214,8 +300,27 @@ function sheetFor_(key) {
   const book = SpreadsheetApp.openById(id);
   let sheet = book.getSheetByName(config.name);
   if (!sheet) sheet = book.insertSheet(config.name);
-  if (sheet.getLastRow() === 0) sheet.appendRow(config.headers);
+  if (key === 'users') migrateUsersSchema_(sheet);
+  else if (sheet.getLastRow() === 0) sheet.appendRow(config.headers);
   return sheet;
+}
+
+function migrateUsersSchema_(sheet) {
+  const targetHeaders = LOGGER_SHEETS.users.headers;
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(targetHeaders);
+    return;
+  }
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), targetHeaders.length)).getValues()[0].map(String);
+  const legacy = ['email', 'displayName', 'salt', 'passwordHash', 'status', 'createdAt', 'lastLoginAt'];
+  if (headers.slice(0, legacy.length).join('|') === legacy.join('|')) {
+    const rowCount = sheet.getLastRow() - 1;
+    if (rowCount > 0) {
+      const rows = sheet.getRange(2, 1, rowCount, legacy.length).getValues();
+      sheet.getRange(2, 1, rowCount, targetHeaders.length).setValues(rows.map((row) => [row[1], row[0], row[2], row[3], row[4], row[5], row[6]]));
+    }
+    sheet.getRange(1, 1, 1, targetHeaders.length).setValues([targetHeaders]);
+  }
 }
 
 function readRows_(sheet) {
@@ -264,6 +369,24 @@ function normalizedEmail_(value) {
   const email = String(value || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('A valid Google account email is required.');
   return email;
+}
+
+function normalizedAccountName_(value) {
+  const accountName = cleanText_(value, 80).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{2,79}$/.test(accountName)) {
+    throw new Error('Use an account name with 3-80 letters, numbers, dots, hyphens, or underscores.');
+  }
+  return accountName;
+}
+
+function hasFinancialPattern_(value) {
+  const text = String(value || '');
+  const patterns = [
+    /\b(bank|banking|wire|routing|sort code|swift|bic|iban|account number|account details|credit card|debit card|card number|cash app|venmo|zelle|paypal|crypto|wallet|bitcoin|invoice|refund|salary|payroll|tax|loan|mortgage|social security|ssn)\b/i,
+    /\b(?:\d[ -]?){12,19}\b/,
+    /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/i,
+  ];
+  return patterns.some((pattern) => pattern.test(text));
 }
 
 function cleanText_(value, maxLength) {
