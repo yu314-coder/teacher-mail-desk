@@ -76,6 +76,7 @@ let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
 let conversationRequestNumber = 0;
+let remoteConversationRequestNumber = 0;
 
 function showAlert(message, type = 'error') {
   const container = $('alertContainer');
@@ -391,6 +392,20 @@ function selectThread(id) {
     showAlert('');
     renderThread(loaded);
     updateFolderCounts();
+    if (loaded.needsRemoteCheck) {
+      const remoteRequestNumber = ++remoteConversationRequestNumber;
+      authenticatedRpc('getManagedThreadRemote', [id]).then((remoteResult) => {
+        if (remoteRequestNumber !== remoteConversationRequestNumber || selectedThreadId !== id) return;
+        const remoteThread = remoteResult && remoteResult.thread ? remoteResult.thread : remoteResult;
+        if (!remoteThread) return;
+        const remoteIndex = currentThreads.findIndex((item) => item.threadId === id);
+        if (remoteIndex >= 0) currentThreads[remoteIndex] = remoteThread;
+        if (!$('replyBody').value.trim()) renderThread(remoteThread);
+        updateFolderCounts();
+      }).catch(() => {
+        // The audited copy stays readable if Gmail is temporarily slow.
+      });
+    }
   }).catch((error) => {
     if (requestNumber !== conversationRequestNumber || selectedThreadId !== id) return;
     $('messageList').textContent = '';

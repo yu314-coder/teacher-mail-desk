@@ -79,6 +79,7 @@ function bridgePost_(parameters) {
     case 'setupMailbox': result = setupMailbox(args[0]); break;
     case 'listManagedThreads': result = listManagedThreads(args[0]); break;
     case 'getManagedThread': result = getManagedThread(args[0], args[1]); break;
+    case 'getManagedThreadRemote': result = getManagedThreadRemote(args[0], args[1]); break;
     case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
     case 'replyToThread': result = replyToThread(args[0], args[1], args[2], args[3]); break;
     case 'forwardMessage': result = forwardMessage(args[0], args[1], args[2], args[3], args[4], args[5]); break;
@@ -206,6 +207,23 @@ function getManagedThread(sessionToken, threadId) {
   return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
 }
 
+function getManagedThreadRemote(sessionToken, threadId) {
+  const email = backendEmail_();
+  const id = cleanText_(threadId, 160);
+  if (!id) throw new Error('Choose a conversation first.');
+  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const allowedSenders = new Set(snapshot.allowedSenders || []);
+  let record = (snapshot.threads || []).find((item) => item && String(item.threadId) === id) || null;
+  const gmailThread = GmailApp.getThreadById(id);
+  if (!gmailThread) throw new Error('The Gmail conversation could not be found.');
+  if (!record) {
+    const labels = gmailThread.getLabels().map((label) => label.getName());
+    if (labels.indexOf(PORTAL.labelName) < 0) throw new Error('That conversation was not started through this portal.');
+    record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
+  }
+  return { ok: true, thread: gmailAppThreadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+}
+
 function groupAuditsByMessage_(audits) {
   const byMessageId = {};
   const byThreadId = {};
@@ -259,7 +277,69 @@ function threadViewFromAudits_(email, record, audits) {
     return synthetic;
   });
   const grouped = groupAuditsByMessage_(audits);
-  return threadView_({ messages }, email, record, new Set(), grouped);
+  const view = threadView_({ messages }, email, record, new Set(), grouped);
+  view.needsRemoteCheck = true;
+  return view;
+}
+
+function gmailAppThreadView_(gmailThread, email, record, allowedSenders, auditIndex) {
+  const auditByMessageId = auditIndex && auditIndex.byMessageId ? auditIndex.byMessageId : {};
+  const messageViews = gmailThread.getMessages().map((message) => gmailAppMessageView_(message, email, auditByMessageId[String(message.getId() || '')] || null));
+  return threadViewFromMessageViews_(messageViews, email, record, allowedSenders);
+}
+
+function gmailAppMessageView_(message, accountEmail, audit) {
+  const subject = String(message.getSubject() || String(audit && audit.subject || ''));
+  const from = String(message.getFrom() || String(audit && audit.from || ''));
+  const body = String(message.getPlainBody() || String(audit && audit.body || ''));
+  const attachments = message.getAttachments().map((file) => ({
+    name: safeDisplayText_(file.getName(), 160),
+    mimeType: safeDisplayText_(file.getContentType(), 120),
+    size: Number(file.getSize() || 0),
+  })).slice(0, 20);
+  const blocked = hasFinancialPattern_(subject + '\n' + body);
+  return {
+    id: String(message.getId() || ''),
+    blocked,
+    attachment: attachments.length > 0 || Boolean(audit && audit.attachmentMetadata),
+    date: message.getDate() instanceof Date ? message.getDate().toISOString() : String(audit && audit.timestamp || ''),
+    from: blocked ? '' : addressFrom_(from) || from,
+    fromName: blocked ? '' : safeDisplayText_(displayNameFrom_(from), 180),
+    to: blocked ? '' : safeDisplayText_(message.getTo() || String(audit && audit.to || ''), 1000),
+    cc: blocked ? '' : safeDisplayText_(message.getCc() || '', 1000),
+    replyTo: blocked ? '' : safeDisplayText_(message.getReplyTo() || '', 500),
+    mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
+    subject: blocked ? '' : safeDisplayText_(subject, 180),
+    body: blocked ? '' : safeDisplayText_(body, PORTAL.maxBodyChars),
+    attachments: blocked ? [] : attachments,
+  };
+}
+
+function threadViewFromMessageViews_(messageViews, email, record, allowedSenders) {
+  const messages = (messageViews || []).filter((message) => {
+    const from = addressFrom_(message.from);
+    return !from || from === email || allowedSenders.has(from);
+  });
+  const visible = messages.filter((message) => !message.blocked && message.body);
+  const lastVisible = visible.length ? visible[visible.length - 1] : null;
+  const inbound = messages.filter((message) => !message.mine);
+  const sent = messages.filter((message) => message.mine);
+  const lastMessage = messages.length ? messages[messages.length - 1] : null;
+  return {
+    threadId: record.threadId,
+    recipient: String(record.recipient || '').trim(),
+    createdAt: String(record.createdAt || ''),
+    lastSeenAt: String(record.lastSeenAt || ''),
+    lastMessageAt: lastMessage ? lastMessage.date : String(record.lastSeenAt || record.createdAt || ''),
+    sender: inbound.length ? inbound[inbound.length - 1].from : '',
+    hasInbound: inbound.length > 0,
+    hasSent: sent.length > 0,
+    subject: lastVisible ? lastVisible.subject : 'Private conversation',
+    preview: lastVisible ? lastVisible.body.slice(0, 220) : 'This conversation is hidden by the privacy filter.',
+    messageCount: messages.length,
+    needsRemoteCheck: false,
+    messages,
+  };
 }
 
 function sendMessage(sessionToken, to, subject, body, attachments) {
