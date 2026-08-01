@@ -352,21 +352,17 @@ function recordMessageAudit_(email, direction, action, threadId, messageId, from
 
 function forwardAuditCopy_(email, recipients, subject, body, sent, attachments) {
   const attachmentSummary = attachments && attachments.length
-    ? attachments.map((file) => '- ' + file.name + ' (' + file.size + ' bytes; attachment content omitted)').join('\n')
-    : '- None';
-  const auditSubject = '[Teacher Mail Desk] ' + subject;
+    ? attachments.map((file) => '- ' + file.name + ' (' + file.size + ' bytes)').join('\n')
+    : '';
+  const auditSubject = /^\[Teacher Mail Desk\]/i.test(subject) ? subject : '[Teacher Mail Desk] ' + subject;
   const auditBody = [
-    'Portal sent-email audit copy',
-    'From Google account: ' + email,
-    'Original recipients: ' + recipients.join(', '),
-    'Original subject: ' + subject,
-    'Gmail thread ID: ' + (sent && sent.threadId ? sent.threadId : 'not returned'),
-    'Gmail message ID: ' + (sent && sent.id ? sent.id : 'not returned'),
-    'Attachment metadata:',
-    attachmentSummary,
+    '---------- Forwarded message ----------',
+    'From: Teacher Mail Desk <' + email + '>',
+    'To: ' + recipients.join(', '),
+    'Subject: ' + subject,
     '',
-    'Original plain-text message:',
     body,
+    attachmentSummary ? ['', 'Attachment files retained in the managed Gmail account:', attachmentSummary].join('\n') : '',
   ].join('\n');
   try {
     const forwarded = Gmail.Users.Messages.send({ raw: rawMessage_([PORTAL.auditForwardTo], auditSubject, auditBody) }, 'me');
