@@ -5,30 +5,5 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
   </head>
-  <body>
-    <script>
-      const params = new URLSearchParams(window.location.search);
-      const bridgeNonce = params.get('nonce') || '';
-      const allowedMethods = new Set([
-        'getAppState', 'signUp', 'signIn', 'signOut', 'setupMailbox',
-        'listManagedThreads', 'sendMessage', 'replyToThread', 'forwardMessage',
-      ]);
-
-      function reply(message) {
-        window.parent.postMessage(Object.assign({ type: 'teacher-mail-desk:response', nonce: bridgeNonce }, message), '*');
-      }
-
-      window.addEventListener('message', (event) => {
-        if (event.source !== window.parent) return;
-        const data = event.data || {};
-        if (data.type !== 'teacher-mail-desk:request' || data.nonce !== bridgeNonce || !allowedMethods.has(data.method)) return;
-        const runner = google.script.run
-          .withSuccessHandler((result) => reply({ id: data.id, ok: true, result }))
-          .withFailureHandler((error) => reply({ id: data.id, ok: false, error: error && error.message ? error.message : 'Request failed.' }));
-        runner[data.method].apply(runner, Array.isArray(data.args) ? data.args : []);
-      });
-
-      window.parent.postMessage({ type: 'teacher-mail-desk:ready', nonce: bridgeNonce }, '*');
-    </script>
-  </body>
+  <body>Teacher Mail Desk secure bridge.</body>
 </html>

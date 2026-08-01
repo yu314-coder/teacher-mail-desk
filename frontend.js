@@ -9,9 +9,11 @@ let bridgeReady = false;
 let bridgeRequestNumber = 0;
 
 bridgeFrame.id = 'portalBridge';
+bridgeFrame.name = 'teacherMailDeskBridgeTarget';
 bridgeFrame.title = 'Secure Apps Script connection';
 bridgeFrame.setAttribute('aria-hidden', 'true');
 bridgeFrame.src = APP_SCRIPT_URL + '?bridge=1&nonce=' + encodeURIComponent(bridgeNonce);
+bridgeFrame.addEventListener('load', () => { bridgeReady = true; flushBridgeQueue(); });
 document.body.appendChild(bridgeFrame);
 
 function messageText(error) {
@@ -22,13 +24,19 @@ function flushBridgeQueue() {
   if (!bridgeReady) return;
   while (bridgeQueue.length) {
     const request = bridgeQueue.shift();
-    bridgeFrame.contentWindow.postMessage({
-      type: 'teacher-mail-desk:request',
-      nonce: bridgeNonce,
-      id: request.id,
-      method: request.method,
-      args: request.args,
-    }, '*');
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = APP_SCRIPT_URL;
+    form.target = bridgeFrame.name;
+    form.hidden = true;
+    [['bridge', '1'], ['requestId', request.id], ['nonce', bridgeNonce], ['method', request.method], ['args', JSON.stringify(request.args)]].forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = name; input.value = value;
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    HTMLFormElement.prototype.submit.call(form);
+    form.remove();
   }
 }
 
@@ -51,18 +59,13 @@ window.addEventListener('message', (event) => {
   if (event.source !== bridgeFrame.contentWindow) return;
   const data = event.data || {};
   if (data.nonce !== bridgeNonce) return;
-  if (data.type === 'teacher-mail-desk:ready') {
-    bridgeReady = true;
-    $('connectionStatus').textContent = 'Secure backend connected';
-    flushBridgeQueue();
-    return;
-  }
   if (data.type !== 'teacher-mail-desk:response') return;
-  const pending = bridgePending.get(data.id);
+  const pending = bridgePending.get(data.requestId);
   if (!pending) return;
-  bridgePending.delete(data.id);
+  bridgePending.delete(data.requestId);
   if (data.ok) pending.resolve(data.result);
   else pending.reject(new Error(data.error || 'Request failed.'));
+  $('connectionStatus').textContent = 'Secure backend connected';
 });
 
 let currentThreads = [];

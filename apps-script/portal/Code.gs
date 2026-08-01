@@ -34,6 +34,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const parameters = e && e.parameter ? e.parameter : {};
+    if (parameters.bridge === '1') return bridgePost_(parameters);
     backendEmail_();
 
     const action = String(parameters.action || '').trim().toLowerCase();
@@ -49,6 +50,41 @@ function doPost(e) {
   } catch (error) {
     return postResult_('Teacher account', publicError_(error), false);
   }
+}
+
+function bridgePost_(parameters) {
+  const method = String(parameters.method || '').trim();
+  const requestId = cleanText_(parameters.requestId, 120);
+  const nonce = cleanText_(parameters.nonce, 180);
+  const args = JSON.parse(String(parameters.args || '[]'));
+  if (!requestId || !nonce || !Array.isArray(args)) throw new Error('Invalid bridge request.');
+  let result;
+  switch (method) {
+    case 'getAppState': result = getAppState(); break;
+    case 'signUp': result = signUp(args[0], args[1], args[2]); break;
+    case 'signIn': result = signIn(args[0], args[1], args[2]); break;
+    case 'signOut': result = signOut(args[0]); break;
+    case 'setupMailbox': result = setupMailbox(args[0]); break;
+    case 'listManagedThreads': result = listManagedThreads(args[0]); break;
+    case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
+    case 'replyToThread': result = replyToThread(args[0], args[1], args[2], args[3]); break;
+    case 'forwardMessage': result = forwardMessage(args[0], args[1], args[2], args[3], args[4], args[5]); break;
+    default: throw new Error('Unknown bridge operation.');
+  }
+  return bridgeResponse_(requestId, nonce, true, result, '');
+}
+
+function bridgeResponse_(requestId, nonce, ok, result, error) {
+  const message = JSON.stringify({
+    type: 'teacher-mail-desk:response',
+    requestId,
+    nonce,
+    ok: Boolean(ok),
+    result: ok ? result : null,
+    error: ok ? '' : String(error || 'Request failed.'),
+  }).replace(/</g, '\\u003c');
+  return HtmlService.createHtmlOutput('<!doctype html><html><body><script>window.parent.postMessage(' + message + ', "*");</script></body></html>')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function postRedirect_(mode) {
