@@ -15,7 +15,7 @@
         <div class="form-group"><label for="loginAccountName">Account name:</label><input id="loginAccountName" type="text" autocomplete="username" required /></div>
         <div class="form-group"><label for="loginPassword">Portal password:</label><input id="loginPassword" type="password" autocomplete="current-password" minlength="6" required /></div>
         <div class="form-group"><label for="loginAccessCode">Access code:</label><input id="loginAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
-        <div class="button-group"><button id="loginButton" type="submit">Sign in</button><button type="button" id="showRegisterBtn" class="secondary">Create account</button></div>
+        <div class="button-group"><button id="loginButton" type="button">Sign in</button><button type="button" id="showRegisterBtn" class="secondary">Create account</button></div>
         <p class="helper">No teacher email is entered here. Gmail actions run from the owner-managed mailbox in Apps Script.</p>
         <p class="helper">The Gmail and Google Sheet processing runs in the private Apps Script backend. GitHub Pages only displays this interface.</p>
       </form>
@@ -26,7 +26,7 @@
         <div class="form-group"><label for="registerAccountName">Account name:</label><input id="registerAccountName" type="text" autocomplete="username" required /></div>
         <div class="form-group"><label for="registerPassword">Portal password:</label><input id="registerPassword" type="password" autocomplete="new-password" minlength="6" required /></div>
         <div class="form-group"><label for="registerAccessCode">Access code:</label><input id="registerAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
-        <div class="button-group"><button id="registerButton" type="submit">Create account</button><button type="button" id="showLoginBtn" class="secondary">Back to sign in</button></div>
+        <div class="button-group"><button id="registerButton" type="button">Create account</button><button type="button" id="showLoginBtn" class="secondary">Back to sign in</button></div>
         <p class="helper">The password and access code are checked by Apps Script and never saved as plain text. The access-code hash is kept in the private Google Sheet.</p>
       </form>
 
@@ -61,6 +61,6 @@
         </div>
       </section>
     </main>
-    <script src="frontend.js?v=auth-fix-20260801"></script>
+    <script src="frontend.js?v=auth-buttons-20260801"></script>
   </body>
 </html>

@@ -271,6 +271,12 @@ function showState(state) {
 
 $('showRegisterBtn').addEventListener('click', showRegister);
 $('showLoginBtn').addEventListener('click', showLogin);
+$('loginButton').addEventListener('click', () => {
+  submitAccount($('loginForm'), 'signIn', 'loginAccountName', 'loginPassword', 'loginAccessCode', 'Signing in…');
+});
+$('registerButton').addEventListener('click', () => {
+  submitAccount($('registerForm'), 'signUp', 'registerAccountName', 'registerPassword', 'registerAccessCode', 'Creating account…');
+});
 $('loginForm').addEventListener('submit', (event) => {
   event.preventDefault();
   submitAccount(event.currentTarget, 'signIn', 'loginAccountName', 'loginPassword', 'loginAccessCode', 'Signing in…');
