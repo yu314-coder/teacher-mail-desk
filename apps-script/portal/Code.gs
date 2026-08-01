@@ -78,6 +78,7 @@ function bridgePost_(parameters) {
     case 'signOut': result = signOut(args[0]); break;
     case 'setupMailbox': result = setupMailbox(args[0]); break;
     case 'listManagedThreads': result = listManagedThreads(args[0]); break;
+    case 'syncManagedInbox': result = syncManagedInbox(args[0]); break;
     case 'getManagedThread': result = getManagedThread(args[0], args[1]); break;
     case 'getManagedThreadRemote': result = getManagedThreadRemote(args[0], args[1]); break;
     case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
@@ -180,13 +181,29 @@ function listManagedThreads(sessionToken) {
       threadAudits.push(audit);
     }
   });
-  const allowed = managedThreadRecords_(email, allowedSenders, snapshot.threads || []).slice(0, PORTAL.maxThreads);
+  const allowed = managedThreadRecords_(email, allowedSenders, snapshot.threads || [], false).slice(0, PORTAL.maxThreads);
   // Keep the first mailbox request light. Gmail only loads the full message
   // payload after the teacher opens a conversation, just like Gmail's list
   // view does. This avoids one slow full-thread API request per row.
   const result = allowed.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
   result.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
   return { ok: true, threads: result, allowedSenders: Array.from(allowedSenders).sort() };
+}
+
+function syncManagedInbox(sessionToken) {
+  const email = backendEmail_();
+  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const allowedSenders = new Set(snapshot.allowedSenders || []);
+  const auditByThreadId = {};
+  (snapshot.messages || []).forEach((audit) => {
+    if (!audit || !audit.threadId) return;
+    const list = auditByThreadId[String(audit.threadId)] || (auditByThreadId[String(audit.threadId)] = []);
+    list.push(audit);
+  });
+  const records = managedThreadRecords_(email, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+  const threads = records.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
+  threads.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
+  return { ok: true, threads, allowedSenders: Array.from(allowedSenders).sort() };
 }
 
 function getManagedThread(sessionToken, threadId) {
@@ -682,7 +699,7 @@ function allowedSendersFor_(email) {
   return new Set(loggerCall_('listAllowedSenders', { email }));
 }
 
-function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
+function managedThreadRecords_(email, allowedSenders, preloadedRecords, discoverInbound) {
   const records = (preloadedRecords || loggerCall_('listThreads', { email })).slice(-100).reverse();
   const byId = {};
   records.forEach((record) => {
@@ -691,7 +708,7 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
 
   // Recover older conversations already marked by this portal, even if an
   // older portal version did not yet write the thread row to the Sheet.
-  if ((!preloadedRecords || !preloadedRecords.length) && Object.keys(byId).length < PORTAL.maxThreads) {
+  if (discoverInbound && (!preloadedRecords || !preloadedRecords.length) && Object.keys(byId).length < PORTAL.maxThreads) {
     try {
       const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
       if (managedLabel) {
@@ -707,7 +724,7 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
   // A Sheet-approved sender may start a brand-new Gmail thread instead of
   // replying to a portal-created message. Discover those threads and bring
   // them inside the same managed boundary so the teacher can reply here.
-  if (allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) {
+  if (discoverInbound && allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) {
     try {
       const senderQuery = '{' + Array.from(allowedSenders).slice(0, 20).map((sender) => 'from:' + sender).join(' ') + '}';
       const response = Gmail.Users.Threads.list('me', { q: senderQuery, maxResults: PORTAL.maxThreads });

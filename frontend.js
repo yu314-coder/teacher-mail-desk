@@ -75,6 +75,7 @@ let selectedThreadId = '';
 let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
+let inboxSyncInFlight = false;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
@@ -436,6 +437,7 @@ function loadThreads() {
     renderAllowedSenders();
     renderThreads();
     if (selectedThreadId) selectThread(selectedThreadId);
+    syncManagedInboxInBackground();
   }).catch((error) => {
     $('statusLabel').textContent = '';
     const list = $('threadList');
@@ -448,6 +450,29 @@ function loadThreads() {
     showAlert(messageText(error));
   }).finally(() => {
     mailboxLoadInFlight = false;
+  });
+}
+
+function syncManagedInboxInBackground() {
+  if (inboxSyncInFlight || !portalSessionToken) return;
+  inboxSyncInFlight = true;
+  authenticatedRpc('syncManagedInbox', []).then((result) => {
+    const existing = new Map(currentThreads.map((thread) => [thread.threadId, thread]));
+    currentThreads = (result && result.threads ? result.threads : []).map((thread) => {
+      const previous = existing.get(thread.threadId);
+      if (previous && previous.messages && previous.messages.length) {
+        return Object.assign(thread, { messages: previous.messages, needsRemoteCheck: previous.needsRemoteCheck });
+      }
+      return thread;
+    });
+    currentAllowedSenders = result && result.allowedSenders ? result.allowedSenders : currentAllowedSenders;
+    updateFolderCounts();
+    renderAllowedSenders();
+    renderThreads();
+  }).catch(() => {
+    // Inbox discovery is deliberately non-blocking; All mail remains usable.
+  }).finally(() => {
+    inboxSyncInFlight = false;
   });
 }
 
