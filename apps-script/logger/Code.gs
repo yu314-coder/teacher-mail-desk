@@ -275,7 +275,10 @@ function listThreads_(payload) {
     .filter((row) => row.email === email && row.status === 'active')
     .slice(-100)
     .reverse()
-    .map((row) => ({ threadId: row.threadId, recipient: row.recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt }));
+    .map((row) => {
+      const recipient = String(row.recipient || '').trim();
+      return { threadId: row.threadId, recipient, inbound: !recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt };
+    });
 }
 
 function listMessageAudits_(payload) {
