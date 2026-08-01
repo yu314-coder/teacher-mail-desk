@@ -81,6 +81,7 @@ function bridgePost_(parameters) {
     case 'syncManagedInbox': result = syncManagedInbox(args[0]); break;
     case 'getManagedThread': result = getManagedThread(args[0], args[1]); break;
     case 'getManagedThreadRemote': result = getManagedThreadRemote(args[0], args[1]); break;
+    case 'downloadAttachment': result = downloadAttachment(args[0], args[1], args[2], args[3]); break;
     case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
     case 'replyToThread': result = replyToThread(args[0], args[1], args[2], args[3]); break;
     case 'forwardMessage': result = forwardMessage(args[0], args[1], args[2], args[3], args[4], args[5]); break;
@@ -214,18 +215,23 @@ function getManagedThread(sessionToken, threadId) {
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const records = (snapshot.threads || []).filter((record) => record && String(record.threadId) === id);
   let record = records.length ? records[0] : null;
-  const audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
+  let audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
+  if (record && audits.length) {
+    try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
+  }
   // Portal-sent messages are already privacy-filtered and stored in the
   // private Sheet logger. Use that copy immediately instead of waiting on a
   // second Gmail payload request just to open a sent conversation.
-  if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits) };
+  if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits, allowedSenders) };
   // A discovered Inbox thread has no portal audit row by design. Fetch its
   // complete Gmail payload once now so opening it shows the actual sender,
   // headers, body, and safe attachment metadata immediately. The previous
   // path returned a placeholder and then made a second slow GmailApp call.
   if (record && record.inbound) {
     const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
-    return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+    const view = threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(audits));
+    cacheReceivedThread_(email, sessionToken, view);
+    return { ok: true, thread: view };
   }
   if (record) {
     const summary = threadSummary_(record, email, []);
@@ -244,7 +250,7 @@ function getManagedThread(sessionToken, threadId) {
     if (!hasManagedLabel) throw new Error('That conversation was not started through this portal.');
     record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
   }
-  return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+  return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(audits)) };
 }
 
 function getManagedThreadRemote(sessionToken, threadId) {
@@ -254,6 +260,10 @@ function getManagedThreadRemote(sessionToken, threadId) {
   const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   let record = (snapshot.threads || []).find((item) => item && String(item.threadId) === id) || null;
+  let audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
+  if (audits.length) {
+    try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
+  }
   const gmailThread = GmailApp.getThreadById(id);
   if (!gmailThread) throw new Error('The Gmail conversation could not be found.');
   if (!record) {
@@ -261,7 +271,25 @@ function getManagedThreadRemote(sessionToken, threadId) {
     if (labels.indexOf(PORTAL.labelName) < 0) throw new Error('That conversation was not started through this portal.');
     record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
   }
-  return { ok: true, thread: gmailAppThreadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+  return { ok: true, thread: gmailAppThreadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(audits)) };
+}
+
+function cacheReceivedThread_(email, sessionToken, thread) {
+  const messages = (thread && thread.messages || [])
+    .filter((message) => message && !message.mine && !message.blocked && message.id)
+    .map((message) => ({
+      direction: 'received',
+      action: 'cache',
+      threadId: thread.threadId,
+      messageId: message.id,
+      from: message.from,
+      to: message.to,
+      subject: message.subject,
+      body: message.body,
+      attachmentMetadata: JSON.stringify(message.attachments || []),
+    }));
+  if (!messages.length) return;
+  try { loggerCall_('cacheMessages', { email, sessionToken, messages }); } catch (ignored) {}
 }
 
 function groupAuditsByMessage_(audits) {
@@ -282,14 +310,16 @@ function threadSummary_(record, email, audits) {
   const threadAudits = (audits || []).slice().sort((a, b) => dateValue_(b.timestamp) - dateValue_(a.timestamp));
   const latest = threadAudits[0] || null;
   const hasSent = threadAudits.some((audit) => String(audit.direction || '').toLowerCase() === 'sent');
+  const hasInbound = threadAudits.some((audit) => String(audit.direction || '').toLowerCase() === 'received');
+  const latestInbound = threadAudits.find((audit) => String(audit.direction || '').toLowerCase() === 'received') || null;
   return {
     threadId: record.threadId,
     recipient: String(record.recipient || '').trim(),
     createdAt: String(record.createdAt || ''),
     lastSeenAt: String(record.lastSeenAt || ''),
     lastMessageAt: latest ? String(latest.timestamp || record.lastSeenAt || record.createdAt || '') : String(record.lastSeenAt || record.createdAt || ''),
-    sender: latest && latest.from ? addressFrom_(latest.from) : String(record.sender || record.recipient || (record.inbound ? 'Allowed sender' : '')),
-    hasInbound: Boolean(record.inbound),
+    sender: latestInbound && latestInbound.from ? addressFrom_(latestInbound.from) : (latest && latest.from ? addressFrom_(latest.from) : String(record.sender || record.recipient || (record.inbound ? 'Allowed sender' : ''))),
+    hasInbound: Boolean(record.inbound || hasInbound),
     hasSent,
     subject: latest ? safeDisplayText_(latest.subject || 'Private conversation', 180) : safeDisplayText_(record.subject || (record.inbound ? 'Incoming message' : 'Managed conversation'), 180),
     preview: latest && latest.body ? safeDisplayText_(latest.body, 220) : safeDisplayText_(record.preview || 'Open to load the complete conversation.', 220),
@@ -299,7 +329,7 @@ function threadSummary_(record, email, audits) {
   };
 }
 
-function threadViewFromAudits_(email, record, audits) {
+function threadViewFromAudits_(email, record, audits, allowedSenders) {
   const messages = (audits || []).slice().sort((a, b) => dateValue_(a.timestamp) - dateValue_(b.timestamp)).map((audit) => {
     const timestamp = String(audit.timestamp || '');
     const synthetic = {
@@ -317,8 +347,8 @@ function threadViewFromAudits_(email, record, audits) {
     return synthetic;
   });
   const grouped = groupAuditsByMessage_(audits);
-  const view = threadView_({ messages }, email, record, new Set(), grouped);
-  view.needsRemoteCheck = true;
+  const view = threadView_({ messages }, email, record, allowedSenders || new Set(), grouped);
+  view.needsRemoteCheck = !(audits || []).some((audit) => String(audit.direction || '').toLowerCase() === 'received');
   return view;
 }
 
@@ -461,9 +491,9 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   }
   const sourceSubject = header_(source, 'Subject') || 'Teacher Mail Desk conversation';
   const sourceBody = plainBody_(source.payload);
-  if (!sourceBody || hasAttachment_(source.payload) || hasFinancialPattern_(sourceSubject + '\n' + sourceBody)) {
-    throw new Error('This message is hidden by the privacy filter and cannot be forwarded.');
-  }
+  const sourceAttachments = attachmentInputsFromMessage_(source);
+  if (!sourceBody && !sourceAttachments.length) throw new Error('This message is empty and cannot be forwarded.');
+  if (hasFinancialPattern_(sourceSubject + '\n' + sourceBody + '\n' + sourceAttachments.map((file) => file.name + ' ' + file.mimeType).join('\n'))) throw new Error('This message is hidden by the privacy filter and cannot be forwarded.');
   const cleanNote = cleanText_(note, PORTAL.maxBodyChars);
   const forwardedBody = [
     cleanNote,
@@ -476,7 +506,7 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
     sourceBody,
   ].filter((line) => line !== null).join('\n');
   assertSafeContent_(sourceSubject + '\n' + forwardedBody);
-  const safeAttachments = normalizeAttachments_(attachments);
+  const safeAttachments = normalizeAttachments_(sourceAttachments.concat(attachments || []));
   const forwardSubject = /^fwd:/i.test(sourceSubject) ? sourceSubject : 'Fwd: ' + sourceSubject;
   const sent = Gmail.Users.Messages.send({ raw: rawMessage_(recipients, forwardSubject, forwardedBody, [], safeAttachments) }, 'me');
   if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
@@ -487,6 +517,28 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   recordMessageAudit_(email, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
   forwardAuditCopy_(email, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
   return { ok: true, sent: true };
+}
+
+function attachmentInputsFromMessage_(message) {
+  const result = [];
+  function collect(part) {
+    if (!part) return;
+    if (part.filename) {
+      const name = safeDisplayText_(part.filename, 160);
+      const mimeType = safeDisplayText_(part.mimeType, 120) || 'application/octet-stream';
+      if (hasFinancialPattern_(name + '\n' + mimeType)) throw new Error('This attachment is hidden by the privacy filter.');
+      let data = part.body && part.body.data;
+      if (!data && part.body && part.body.attachmentId) {
+        const attachment = Gmail.Users.Attachments.get('me', String(message.id), part.body.attachmentId);
+        data = attachment && attachment.data;
+      }
+      if (!data) throw new Error('One original attachment is not available for forwarding.');
+      result.push({ name, mimeType, base64: standardBase64_(data) });
+    }
+    (part.parts || []).forEach(collect);
+  }
+  collect(message && message.payload);
+  return result;
 }
 
 function setupMailbox(sessionToken) {
@@ -637,7 +689,7 @@ function messageView_(message, accountEmail, audit) {
   const date = header_(message, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : String(audit && audit.timestamp || ''));
   const hasAttachment = hasAttachment_(message.payload);
   const body = plainBody_(message.payload) || String(audit && audit.body || '');
-  const attachments = attachmentSummaries_(message.payload, audit);
+  const attachments = attachmentSummaries_(message.payload, audit, String(message.id || ''));
   const attachmentNames = attachments.map((file) => file.name + ' ' + file.mimeType).join('\n');
   if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentNames)) {
     return {
@@ -678,23 +730,89 @@ function displayNameFrom_(value) {
   return match ? match[1].replace(/^"|"$/g, '').trim() : '';
 }
 
-function attachmentSummaries_(payload, audit) {
+function attachmentSummaries_(payload, audit, messageId) {
   const result = [];
   function collect(part) {
     if (!part) return;
-    if (part.filename) result.push({ name: safeDisplayText_(part.filename, 160), mimeType: safeDisplayText_(part.mimeType, 120), size: Number(part.body && part.body.size || 0) });
+    if (part.filename) result.push({
+      name: safeDisplayText_(part.filename, 160),
+      mimeType: safeDisplayText_(part.mimeType, 120),
+      size: Number(part.body && part.body.size || 0),
+      attachmentId: safeDisplayText_(part.body && part.body.attachmentId, 240),
+      messageId: safeDisplayText_(messageId, 160),
+    });
     (part.parts || []).forEach(collect);
   }
   collect(payload);
   if (!result.length && audit && audit.attachmentMetadata) {
-    String(audit.attachmentMetadata).split('\n').forEach((line) => {
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed && parsed.name) result.push({ name: safeDisplayText_(parsed.name, 160), mimeType: safeDisplayText_(parsed.mimeType, 120), size: Number(parsed.size || 0) });
-      } catch (ignored) {}
-    });
+    const addParsed = (parsed) => {
+      const files = Array.isArray(parsed) ? parsed : [parsed];
+      files.forEach((file) => {
+        if (!file || !file.name) return;
+        result.push({
+          name: safeDisplayText_(file.name, 160),
+          mimeType: safeDisplayText_(file.mimeType, 120),
+          size: Number(file.size || 0),
+          attachmentId: safeDisplayText_(file.attachmentId, 240),
+          messageId: safeDisplayText_(file.messageId || messageId, 160),
+        });
+      });
+    };
+    try {
+      addParsed(JSON.parse(String(audit.attachmentMetadata)));
+    } catch (ignored) {
+      String(audit.attachmentMetadata).split('\n').forEach((line) => {
+        try { addParsed(JSON.parse(line)); } catch (ignoredLine) {}
+      });
+    }
   }
   return result.slice(0, 20);
+}
+
+function findAttachmentPart_(payload, attachmentId, name) {
+  if (!payload) return null;
+  const partId = String(payload.body && payload.body.attachmentId || '');
+  const filename = String(payload.filename || '');
+  if ((attachmentId && partId === attachmentId) || (!attachmentId && name && filename === name)) return payload;
+  for (const part of (payload.parts || [])) {
+    const found = findAttachmentPart_(part, attachmentId, name);
+    if (found) return found;
+  }
+  return null;
+}
+
+function standardBase64_(value) {
+  return Utilities.base64Encode(Utilities.base64DecodeWebSafe(String(value || '')));
+}
+
+function downloadAttachment(sessionToken, threadId, messageId, attachmentId) {
+  const email = requireSession_(sessionToken);
+  const id = cleanText_(threadId, 160);
+  const mid = cleanText_(messageId, 160);
+  const aid = cleanText_(attachmentId, 240);
+  if (!id || !mid || !aid) throw new Error('The received file could not be identified.');
+  const record = allowedThreadMap_(email)[id];
+  if (!record) throw new Error('That conversation was not started through this portal.');
+  const message = Gmail.Users.Messages.get('me', mid, { format: 'full' });
+  if (String(message.threadId || '') !== id) throw new Error('The received file does not belong to this conversation.');
+  const sourceFrom = addressFrom_(header_(message, 'From'));
+  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email).has(sourceFrom)) throw new Error('This sender is not on the AllowedSenders list.');
+  const subject = header_(message, 'Subject');
+  const body = plainBody_(message.payload);
+  const part = findAttachmentPart_(message.payload, aid, '');
+  if (!part || hasFinancialPattern_(subject + '\n' + body + '\n' + part.filename + '\n' + part.mimeType)) {
+    throw new Error('This file is hidden by the privacy filter.');
+  }
+  let data = part.body && part.body.data;
+  if (!data && part.body && part.body.attachmentId) {
+    const attachment = Gmail.Users.Attachments.get('me', mid, part.body.attachmentId);
+    data = attachment && attachment.data;
+  }
+  if (!data) throw new Error('The received file is not available.');
+  const base64 = standardBase64_(data);
+  const size = Math.floor(base64.length * 3 / 4);
+  if (size > PORTAL.maxAttachmentBytes) throw new Error('This file is larger than the portal download limit.');
+  return { ok: true, name: safeDisplayText_(part.filename, 160), mimeType: safeDisplayText_(part.mimeType, 120) || 'application/octet-stream', size, base64 };
 }
 
 function latestInbound_(thread, accountEmail) {

@@ -76,6 +76,7 @@ let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
 let inboxSyncInFlight = false;
+let inboxSyncTimer = 0;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
@@ -118,6 +119,7 @@ function hideDashboard() {
   activeFolder = 'all';
   selectedThreadId = '';
   selectedMessageId = '';
+  window.clearTimeout(inboxSyncTimer);
 }
 
 function setBusy(button, busy, label) {
@@ -274,6 +276,24 @@ function appendDetailRow(container, label, value) {
   container.appendChild(row);
 }
 
+function downloadReceivedAttachment(threadId, messageId, file, button) {
+  setBusy(button, true, 'Downloading…');
+  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId]).then((result) => {
+    const binary = atob(String(result && result.base64 || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType || 'application/octet-stream' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.name || file.name || 'received-file';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showAlert('File downloaded.', 'success');
+  }).catch((error) => showAlert(messageText(error))).finally(() => setBusy(button, false));
+}
+
 function renderThread(thread) {
   if (!thread) return;
   renderThreads();
@@ -342,8 +362,13 @@ function renderThread(thread) {
         const attachments = document.createElement('div');
         attachments.className = 'message-attachment-list';
         message.attachments.forEach((file) => {
-          const chip = document.createElement('span');
+          const chip = document.createElement(file.attachmentId ? 'button' : 'span');
           chip.className = 'attachment-chip';
+          if (file.attachmentId) {
+            chip.type = 'button';
+            chip.title = 'Download received file';
+            chip.addEventListener('click', () => downloadReceivedAttachment(thread.threadId, message.id, file, chip));
+          }
           chip.textContent = file.name + (file.size ? ' · ' + Math.ceil(file.size / 1024) + ' KB' : '');
           attachments.appendChild(chip);
         });
@@ -447,7 +472,10 @@ function loadThreads() {
     renderAllowedSenders();
     renderThreads();
     if (selectedThreadId) selectThread(selectedThreadId);
-    syncManagedInboxInBackground();
+    window.clearTimeout(inboxSyncTimer);
+    // Let the first list render and the teacher's first click finish before
+    // running the slower Gmail sender search in the background.
+    inboxSyncTimer = window.setTimeout(syncManagedInboxInBackground, 3500);
   }).catch((error) => {
     $('statusLabel').textContent = '';
     const list = $('threadList');

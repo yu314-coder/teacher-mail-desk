@@ -96,6 +96,8 @@ function handleOperation_(operation, payload) {
     case 'logout': return logout_(payload);
     case 'authorize': return authorize_(payload);
     case 'mailboxSnapshot': return mailboxSnapshot_(payload);
+    case 'threadMessages': return threadMessages_(payload);
+    case 'cacheMessages': return cacheMessages_(payload);
     case 'recordThread': return recordThread_(payload);
     case 'recordThreads': return recordThreads_(payload);
     case 'listThreads': return listThreads_(payload);
@@ -229,8 +231,7 @@ function authorize_(payload) {
 function mailboxSnapshot_(payload) {
   const email = normalizedEmail_(payload.email);
   authorize_(payload);
-  const token = String(payload.sessionToken || '');
-  const cacheKey = 'teacher-mail-desk:mailbox:' + hash_(email + '|' + token, 'mailbox').slice(0, 48);
+  const cacheKey = mailboxCacheKey_(email);
   const cached = CacheService.getScriptCache().get(cacheKey);
   if (cached) {
     try { return JSON.parse(cached); } catch (ignored) {}
@@ -238,10 +239,65 @@ function mailboxSnapshot_(payload) {
   const snapshot = {
     threads: listThreads_({ email }),
     allowedSenders: listAllowedSenders_({ email }),
-    messages: listMessageAudits_({ email }),
+    messages: listMessageAudits_({ email, previewOnly: true }),
   };
   try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(snapshot), LOGGER_CACHE.mailboxSeconds); } catch (ignored) {}
   return snapshot;
+}
+
+function threadMessages_(payload) {
+  const email = normalizedEmail_(payload.email);
+  authorize_(payload);
+  const threadId = cleanText_(payload.threadId, 160);
+  if (!threadId) throw new Error('A Gmail thread ID is required.');
+  return listMessageAudits_({ email, threadId, previewOnly: false });
+}
+
+function cacheMessages_(payload) {
+  const email = normalizedEmail_(payload.email);
+  authorize_(payload);
+  const items = Array.isArray(payload.messages) ? payload.messages.slice(0, 50) : [];
+  if (!items.length) return { recorded: true, count: 0 };
+
+  const sheet = sheetFor_('messages');
+  const existing = {};
+  readRows_(sheet).forEach((row) => {
+    if (row.email === email && row.messageId && row.direction) {
+      existing[String(row.direction) + ':' + String(row.messageId)] = row;
+    }
+  });
+  const rows = [];
+  let count = 0;
+  items.forEach((item) => {
+    const direction = cleanText_(item && item.direction, 20) || 'received';
+    const action = cleanText_(item && item.action, 40) || 'cache';
+    const threadId = cleanText_(item && item.threadId, 160);
+    const messageId = cleanText_(item && item.messageId, 160);
+    const from = cleanText_(item && item.from, 500);
+    const to = cleanText_(item && item.to, 500);
+    const subject = cleanText_(item && item.subject, 180);
+    const body = cleanText_(item && item.body, 48000);
+    const attachmentMetadata = cleanText_(item && item.attachmentMetadata, 4000);
+    if (!threadId || !messageId) return;
+    if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentMetadata)) return;
+    const key = direction + ':' + messageId;
+    if (existing[key] && existing[key].row) {
+      updateRow_(sheet, existing[key].row, existing[key].headers, {
+        timestamp: new Date(), action, threadId, from, to, subject, body, attachmentMetadata, result: 'success',
+      });
+      count += 1;
+      return;
+    }
+    if (existing[key]) return;
+    existing[key] = { row: 0 };
+    rows.push([new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, 'success']);
+    count += 1;
+  });
+  if (rows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.messages.headers.length).setValues(rows);
+  }
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
+  return { recorded: true, count };
 }
 
 function logout_(payload) {
@@ -267,6 +323,7 @@ function recordThread_(payload) {
   } else {
     sheet.appendRow([email, threadId, recipient, new Date(), new Date(), 'active']);
   }
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
   return { recorded: true };
 }
 
@@ -290,6 +347,7 @@ function recordThreads_(payload) {
   if (rows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.threads.headers.length).setValues(rows);
   }
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
   return { recorded: true, count: rows.length };
 }
 
@@ -310,8 +368,10 @@ function listThreads_(payload) {
 
 function listMessageAudits_(payload) {
   const email = normalizedEmail_(payload.email);
+  const threadId = cleanText_(payload.threadId, 160);
+  const previewOnly = payload.previewOnly !== false;
   return readRows_(sheetFor_('messages'))
-    .filter((row) => row.email === email && row.result === 'success')
+    .filter((row) => row.email === email && row.result === 'success' && (!threadId || String(row.threadId) === threadId))
     .slice(-200)
     .reverse()
     .map((row) => ({
@@ -323,7 +383,7 @@ function listMessageAudits_(payload) {
       from: row.from,
       to: row.to,
       subject: row.subject,
-      body: row.body,
+      body: previewOnly ? String(row.body || '').slice(0, 260) : row.body,
       attachmentMetadata: row.attachmentMetadata,
     }));
 }
@@ -358,11 +418,13 @@ function ensureAllowedSenders_(payload) {
     });
   }
   if (payload.sessionToken) {
-    const token = String(payload.sessionToken || '');
-    const cacheKey = 'teacher-mail-desk:mailbox:' + hash_(email + '|' + token, 'mailbox').slice(0, 48);
-    CacheService.getScriptCache().remove(cacheKey);
+    CacheService.getScriptCache().remove(mailboxCacheKey_(email));
   }
   return { allowedSenders: listAllowedSenders_({ email }) };
+}
+
+function mailboxCacheKey_(email) {
+  return 'teacher-mail-desk:mailbox:' + hash_(String(email || '').toLowerCase(), 'mailbox').slice(0, 48);
 }
 
 function allowedSenderStatus_(value) {
