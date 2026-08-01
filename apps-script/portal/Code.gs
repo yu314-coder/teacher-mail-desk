@@ -215,7 +215,9 @@ function replyToThread(sessionToken, threadId, body, attachments) {
     recordAudit_(email, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
-  const recipient = inbound ? addressFrom_(header_(inbound, 'From')) : record.recipient.split(',')[0].trim();
+  const recipient = inbound
+    ? addressFrom_(header_(inbound, 'From'))
+    : String(record.recipient || '').split(',')[0].trim() || recipientFromThread_(thread, email);
   if (!recipient || !isEmail_(recipient)) throw new Error('No safe reply recipient was found.');
   const source = inbound || (thread.messages || []).slice(-1)[0];
   const sourceSubject = header_(source, 'Subject') || 'Teacher Mail Desk conversation';
@@ -394,9 +396,10 @@ function threadView_(thread, email, record, allowedSenders) {
   const inbound = messages.filter((message) => !message.mine);
   const sent = messages.filter((message) => message.mine);
   const lastMessage = messages.length ? messages[messages.length - 1] : null;
+  const recipient = String(record.recipient || '').trim() || recipientFromThread_(thread, email);
   return {
     threadId: record.threadId,
-    recipient: record.recipient,
+    recipient,
     createdAt: String(record.createdAt || ''),
     lastSeenAt: String(record.lastSeenAt || ''),
     lastMessageAt: lastMessage ? lastMessage.date : String(record.lastSeenAt || record.createdAt || ''),
@@ -448,6 +451,19 @@ function managedThreadRecords_(email, allowedSenders) {
     if (record && record.threadId) byId[record.threadId] = record;
   });
 
+  // Recover older conversations already marked by this portal, even if an
+  // older portal version did not yet write the thread row to the Sheet.
+  try {
+    const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
+    if (managedLabel) {
+      const response = Gmail.Users.Threads.list('me', { labelIds: [managedLabel.id], maxResults: 100 });
+      (response.threads || []).forEach((thread) => {
+        const threadId = String(thread.id || '').trim();
+        if (threadId && !byId[threadId]) byId[threadId] = { threadId, recipient: '', createdAt: '', lastSeenAt: '' };
+      });
+    }
+  } catch (ignored) {}
+
   // A Sheet-approved sender may start a brand-new Gmail thread instead of
   // replying to a portal-created message. Discover those threads and bring
   // them inside the same managed boundary so the teacher can reply here.
@@ -469,6 +485,17 @@ function managedThreadRecords_(email, allowedSenders) {
 function dateValue_(value) {
   const timestamp = new Date(value || '').getTime();
   return isNaN(timestamp) ? 0 : timestamp;
+}
+
+function recipientFromThread_(thread, email) {
+  const messages = (thread && thread.messages || []).slice().reverse();
+  for (const message of messages) {
+    if (addressFrom_(header_(message, 'From')) !== email) continue;
+    const match = String(header_(message, 'To') || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    const recipient = match ? match[0].toLowerCase() : '';
+    if (recipient && recipient !== email) return recipient;
+  }
+  return '';
 }
 
 function rawMessage_(recipients, subject, body, extraHeaders, attachments) {
