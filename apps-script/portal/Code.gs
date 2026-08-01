@@ -9,7 +9,7 @@
 const PORTAL = {
   pagesUrl: 'https://yu314-coder.github.io/teacher-mail-desk/',
   labelName: 'TeacherPortal/Managed',
-  maxThreads: 40,
+  maxThreads: 30,
   maxBodyChars: 60000,
   maxAttachmentBytes: 20 * 1024 * 1024,
   auditForwardTo: 'imadmitted@gmail.com',
@@ -78,6 +78,7 @@ function bridgePost_(parameters) {
     case 'signOut': result = signOut(args[0]); break;
     case 'setupMailbox': result = setupMailbox(args[0]); break;
     case 'listManagedThreads': result = listManagedThreads(args[0]); break;
+    case 'getManagedThread': result = getManagedThread(args[0], args[1]); break;
     case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
     case 'replyToThread': result = replyToThread(args[0], args[1], args[2], args[3]); break;
     case 'forwardMessage': result = forwardMessage(args[0], args[1], args[2], args[3], args[4], args[5]); break;
@@ -161,31 +162,78 @@ function listManagedThreads(sessionToken) {
   const email = backendEmail_();
   const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
   const allowedSenders = new Set(snapshot.allowedSenders || []);
-  const auditByMessageId = {};
   const auditByThreadId = {};
   (snapshot.messages || []).forEach((audit) => {
     if (!audit) return;
-    if (audit.messageId) auditByMessageId[String(audit.messageId)] = audit;
     if (audit.threadId) {
       const threadAudits = auditByThreadId[String(audit.threadId)] || (auditByThreadId[String(audit.threadId)] = []);
       threadAudits.push(audit);
     }
   });
   const allowed = managedThreadRecords_(email, allowedSenders, snapshot.threads || []).slice(0, PORTAL.maxThreads);
-  const result = [];
-  allowed.forEach((record) => {
-    try {
-      const thread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
-      const view = threadView_(thread, email, record, allowedSenders, { byMessageId: auditByMessageId, byThreadId: auditByThreadId });
-      result.push(view);
-    } catch (error) {
-      // A deleted or inaccessible thread remains in the audit log but is not
-      // allowed to break the rest of the inbox.
-      recordAudit_(email, 'read_thread', record.threadId, '', 'error', 'Gmail thread unavailable');
-    }
-  });
+  // Keep the first mailbox request light. Gmail only loads the full message
+  // payload after the teacher opens a conversation, just like Gmail's list
+  // view does. This avoids one slow full-thread API request per row.
+  const result = allowed.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
   result.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
   return { ok: true, threads: result, allowedSenders: Array.from(allowedSenders).sort() };
+}
+
+function getManagedThread(sessionToken, threadId) {
+  const email = backendEmail_();
+  const id = cleanText_(threadId, 160);
+  if (!id) throw new Error('Choose a conversation first.');
+  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const allowedSenders = new Set(snapshot.allowedSenders || []);
+  const records = (snapshot.threads || []).filter((record) => record && String(record.threadId) === id);
+  let record = records.length ? records[0] : null;
+  const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
+
+  // Older portal versions could label a managed thread before the Sheet row
+  // was written. Accept that thread only when Gmail confirms the private
+  // portal label, never from a client-supplied ID alone.
+  if (!record) {
+    const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
+    const hasManagedLabel = Boolean(managedLabel && (thread.messages || []).some((message) => (message.labelIds || []).indexOf(managedLabel.id) >= 0));
+    if (!hasManagedLabel) throw new Error('That conversation was not started through this portal.');
+    record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
+  }
+  return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+}
+
+function groupAuditsByMessage_(audits) {
+  const byMessageId = {};
+  const byThreadId = {};
+  (audits || []).forEach((audit) => {
+    if (!audit) return;
+    if (audit.messageId) byMessageId[String(audit.messageId)] = audit;
+    if (audit.threadId) {
+      const list = byThreadId[String(audit.threadId)] || (byThreadId[String(audit.threadId)] = []);
+      list.push(audit);
+    }
+  });
+  return { byMessageId, byThreadId };
+}
+
+function threadSummary_(record, email, audits) {
+  const threadAudits = (audits || []).slice().sort((a, b) => dateValue_(b.timestamp) - dateValue_(a.timestamp));
+  const latest = threadAudits[0] || null;
+  const hasSent = threadAudits.some((audit) => String(audit.direction || '').toLowerCase() === 'sent');
+  return {
+    threadId: record.threadId,
+    recipient: String(record.recipient || '').trim(),
+    createdAt: String(record.createdAt || ''),
+    lastSeenAt: String(record.lastSeenAt || ''),
+    lastMessageAt: latest ? String(latest.timestamp || record.lastSeenAt || record.createdAt || '') : String(record.lastSeenAt || record.createdAt || ''),
+    sender: latest && latest.from ? addressFrom_(latest.from) : String(record.recipient || ''),
+    hasInbound: Boolean(record.inbound),
+    hasSent,
+    subject: latest ? safeDisplayText_(latest.subject || 'Private conversation', 180) : 'Managed conversation',
+    preview: latest && latest.body ? safeDisplayText_(latest.body, 220) : 'Open to load the complete conversation.',
+    messageCount: threadAudits.length,
+    loaded: false,
+    messages: [],
+  };
 }
 
 function sendMessage(sessionToken, to, subject, body, attachments) {
@@ -314,16 +362,26 @@ function loggerCall_(operation, payload) {
   const secret = String(props.getProperty('LOGGER_SECRET') || '').trim();
   if (!url || !secret) throw new Error('The portal is not connected to its private Sheet logger yet.');
   const body = Object.assign({}, payload || {}, { operation, secret });
-  const response = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(body),
-    muteHttpExceptions: true,
-  });
-  let decoded;
-  try { decoded = JSON.parse(response.getContentText()); } catch (error) { throw new Error('The private Sheet logger returned an invalid response.'); }
-  if (response.getResponseCode() >= 300 || !decoded.ok) throw new Error(decoded.error || 'The private Sheet logger rejected the request.');
-  return decoded.result;
+  const retryable = ['mailboxSnapshot', 'authorize', 'listThreads', 'listAllowedSenders'].indexOf(operation) >= 0;
+  let lastError = null;
+  for (let attempt = 0; attempt < (retryable ? 2 : 1); attempt += 1) {
+    try {
+      const response = UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(body),
+        muteHttpExceptions: true,
+      });
+      let decoded;
+      try { decoded = JSON.parse(response.getContentText()); } catch (error) { throw new Error('The private Sheet logger returned an invalid response.'); }
+      if (response.getResponseCode() >= 300 || !decoded.ok) throw new Error(decoded.error || 'The private Sheet logger rejected the request.');
+      return decoded.result;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < (retryable ? 2 : 1)) Utilities.sleep(150);
+    }
+  }
+  throw lastError || new Error('The private Sheet logger did not respond.');
 }
 
 function recordAudit_(email, action, threadId, messageId, result, reason) {
@@ -429,7 +487,7 @@ function threadView_(thread, email, record, allowedSenders, auditByMessageId) {
 function messageView_(message, accountEmail, audit) {
   const subject = header_(message, 'Subject') || String(audit && audit.subject || '');
   const from = header_(message, 'From') || String(audit && audit.from || '');
-  const date = header_(message, 'Date');
+  const date = header_(message, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : String(audit && audit.timestamp || ''));
   const hasAttachment = hasAttachment_(message.payload);
   const body = plainBody_(message.payload) || String(audit && audit.body || '');
   if (hasFinancialPattern_(subject + '\n' + body)) {
@@ -439,8 +497,13 @@ function messageView_(message, accountEmail, audit) {
       attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
       date: date || '',
       from: '',
+      fromName: '',
+      to: '',
+      cc: '',
+      replyTo: '',
       subject: '',
       body: '',
+      attachments: [],
       mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
     };
   }
@@ -450,10 +513,39 @@ function messageView_(message, accountEmail, audit) {
     attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
     date: date || '',
     from: addressFrom_(from) || (from || ''),
+    fromName: safeDisplayText_(displayNameFrom_(from), 180),
+    to: safeDisplayText_(header_(message, 'To') || String(audit && audit.to || ''), 1000),
+    cc: safeDisplayText_(header_(message, 'Cc'), 1000),
+    replyTo: safeDisplayText_(header_(message, 'Reply-To'), 500),
     mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
     subject: safeDisplayText_(subject, 180),
     body: safeDisplayText_(body, PORTAL.maxBodyChars),
+    attachments: attachmentSummaries_(message.payload, audit),
   };
+}
+
+function displayNameFrom_(value) {
+  const match = String(value || '').match(/^\s*(.*?)\s*<[^>]+>\s*$/);
+  return match ? match[1].replace(/^"|"$/g, '').trim() : '';
+}
+
+function attachmentSummaries_(payload, audit) {
+  const result = [];
+  function collect(part) {
+    if (!part) return;
+    if (part.filename) result.push({ name: safeDisplayText_(part.filename, 160), mimeType: safeDisplayText_(part.mimeType, 120), size: Number(part.body && part.body.size || 0) });
+    (part.parts || []).forEach(collect);
+  }
+  collect(payload);
+  if (!result.length && audit && audit.attachmentMetadata) {
+    String(audit.attachmentMetadata).split('\n').forEach((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && parsed.name) result.push({ name: safeDisplayText_(parsed.name, 160), mimeType: safeDisplayText_(parsed.mimeType, 120), size: Number(parsed.size || 0) });
+      } catch (ignored) {}
+    });
+  }
+  return result.slice(0, 20);
 }
 
 function latestInbound_(thread, accountEmail) {
@@ -477,27 +569,29 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
 
   // Recover older conversations already marked by this portal, even if an
   // older portal version did not yet write the thread row to the Sheet.
-  try {
-    const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
-    if (managedLabel) {
-      const response = Gmail.Users.Threads.list('me', { labelIds: [managedLabel.id], maxResults: 100 });
-      (response.threads || []).forEach((thread) => {
-        const threadId = String(thread.id || '').trim();
-        if (threadId && !byId[threadId]) byId[threadId] = { threadId, recipient: '', createdAt: '', lastSeenAt: '' };
-      });
-    }
-  } catch (ignored) {}
+  if (Object.keys(byId).length < PORTAL.maxThreads) {
+    try {
+      const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
+      if (managedLabel) {
+        const response = Gmail.Users.Threads.list('me', { labelIds: [managedLabel.id], maxResults: PORTAL.maxThreads });
+        (response.threads || []).forEach((thread) => {
+          const threadId = String(thread.id || '').trim();
+          if (threadId && !byId[threadId]) byId[threadId] = { threadId, recipient: '', createdAt: '', lastSeenAt: '' };
+        });
+      }
+    } catch (ignored) {}
+  }
 
   // A Sheet-approved sender may start a brand-new Gmail thread instead of
   // replying to a portal-created message. Discover those threads and bring
   // them inside the same managed boundary so the teacher can reply here.
-  Array.from(allowedSenders).slice(0, 50).forEach((sender) => {
+  if (allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) Array.from(allowedSenders).slice(0, 20).forEach((sender) => {
     try {
       const response = Gmail.Users.Threads.list('me', { q: 'from:' + sender, maxResults: 20 });
       (response.threads || []).forEach((thread) => {
         const threadId = String(thread.id || '').trim();
         if (!threadId || byId[threadId]) return;
-        const record = { threadId, recipient: sender, createdAt: '', lastSeenAt: '' };
+        const record = { threadId, recipient: sender, createdAt: '', lastSeenAt: '', inbound: true };
         byId[threadId] = record;
         try { loggerCall_('recordThread', { email, threadId, recipient: sender }); } catch (ignored) {}
       });

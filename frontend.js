@@ -7,7 +7,7 @@ const bridgePending = new Map();
 const bridgeQueue = [];
 let bridgeReady = false;
 let bridgeRequestNumber = 0;
-const BRIDGE_TIMEOUT_MS = 90000;
+const BRIDGE_TIMEOUT_MS = 45000;
 
 bridgeFrame.id = 'portalBridge';
 bridgeFrame.name = 'teacherMailDeskBridgeTarget';
@@ -74,6 +74,8 @@ let activeFolder = 'all';
 let selectedThreadId = '';
 let selectedMessageId = '';
 let portalSessionToken = '';
+let mailboxLoadInFlight = false;
+let conversationRequestNumber = 0;
 
 function showAlert(message, type = 'error') {
   const container = $('alertContainer');
@@ -239,15 +241,34 @@ function prepareForward(threadId, messageId) {
   $('forwardForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function selectThread(id) {
-  selectedThreadId = id;
-  const thread = currentThreads.find((item) => item.threadId === id);
+function formatMessageDate(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function appendDetailRow(container, label, value) {
+  if (!value) return;
+  const row = document.createElement('div');
+  row.className = 'message-detail-row';
+  const key = document.createElement('span');
+  key.className = 'message-detail-label';
+  key.textContent = label;
+  const text = document.createElement('span');
+  text.className = 'message-detail-value';
+  text.textContent = value;
+  row.append(key, text);
+  container.appendChild(row);
+}
+
+function renderThread(thread) {
   if (!thread) return;
   renderThreads();
   $('noThread').classList.add('hidden');
   $('threadPanel').classList.remove('hidden');
   $('threadSubject').textContent = thread.subject || 'Private conversation';
-  $('threadRecipient').textContent = 'Conversation with ' + (thread.recipient || 'managed recipient');
+  $('threadRecipient').textContent = (thread.messageCount || (thread.messages || []).length || 1) + ' message' + ((thread.messageCount || (thread.messages || []).length || 1) === 1 ? '' : 's') + ' · Conversation with ' + (thread.recipient || 'managed recipient');
   const list = $('messageList');
   list.textContent = '';
   (thread.messages || []).forEach((message) => {
@@ -256,26 +277,84 @@ function selectThread(id) {
     if (message.blocked) {
       card.textContent = 'This message is hidden by the privacy filter. Attachments and suspected financial/account content are never shown or forwarded.';
     } else {
-      const meta = document.createElement('div');
-      meta.className = 'message-meta';
-      const from = document.createElement('span');
-      from.textContent = message.mine ? 'Sent by teacher portal' : (message.from || 'Sender hidden');
-      const date = document.createElement('span');
-      date.textContent = message.date || '';
-      meta.append(from, date);
+      const header = document.createElement('div');
+      header.className = 'message-header';
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = (message.mine ? 'Y' : (message.fromName || message.from || 'S')).trim().slice(0, 1).toUpperCase();
+      const identity = document.createElement('div');
+      identity.className = 'message-identity';
+      const senderLine = document.createElement('div');
+      senderLine.className = 'message-sender-line';
+      const sender = document.createElement('strong');
+      sender.textContent = message.mine ? 'You' : (message.fromName || message.from || 'Sender hidden');
+      senderLine.appendChild(sender);
+      const email = document.createElement('span');
+      email.className = 'message-email';
+      email.textContent = message.from || '';
+      senderLine.appendChild(email);
+      identity.appendChild(senderLine);
+      const summary = document.createElement('span');
+      summary.className = 'message-recipient-summary';
+      summary.textContent = message.mine ? 'to ' + (message.to || thread.recipient || 'recipient') : 'to me';
+      identity.appendChild(summary);
+      const dateBlock = document.createElement('div');
+      dateBlock.className = 'message-date-block';
+      const date = document.createElement('time');
+      date.dateTime = message.date || '';
+      date.textContent = formatMessageDate(message.date);
+      dateBlock.appendChild(date);
+      const detailsButton = document.createElement('button');
+      detailsButton.type = 'button';
+      detailsButton.className = 'message-detail-toggle';
+      detailsButton.textContent = 'Show details';
+      dateBlock.appendChild(detailsButton);
+      header.append(avatar, identity, dateBlock);
+      const details = document.createElement('div');
+      details.className = 'message-details hidden';
+      appendDetailRow(details, 'From', message.fromName && message.from ? message.fromName + ' <' + message.from + '>' : (message.from || 'Sender hidden'));
+      appendDetailRow(details, 'To', message.to || thread.recipient || 'Managed mailbox');
+      appendDetailRow(details, 'Cc', message.cc);
+      appendDetailRow(details, 'Reply-To', message.replyTo);
+      appendDetailRow(details, 'Date', formatMessageDate(message.date) || message.date);
+      detailsButton.addEventListener('click', () => {
+        const expanded = !details.classList.contains('hidden');
+        details.classList.toggle('hidden', expanded);
+        detailsButton.textContent = expanded ? 'Show details' : 'Hide details';
+      });
       const body = document.createElement('div');
       body.className = 'message-body';
       body.textContent = message.body || '';
-      if (message.attachment) {
+      card.append(header, details, body);
+      if (message.attachments && message.attachments.length) {
+        const attachments = document.createElement('div');
+        attachments.className = 'message-attachment-list';
+        message.attachments.forEach((file) => {
+          const chip = document.createElement('span');
+          chip.className = 'attachment-chip';
+          chip.textContent = file.name + (file.size ? ' · ' + Math.ceil(file.size / 1024) + ' KB' : '');
+          attachments.appendChild(chip);
+        });
+        card.appendChild(attachments);
+      } else if (message.attachment) {
         const attachmentNote = document.createElement('div');
         attachmentNote.className = 'message-attachment-note';
         attachmentNote.textContent = 'Attachment present. File contents stay in the managed Gmail account.';
-        card.append(meta, body, attachmentNote);
-      } else {
-        card.append(meta, body);
+        card.appendChild(attachmentNote);
       }
       const actions = document.createElement('div');
       actions.className = 'message-actions';
+      if (!message.mine) {
+        const reply = document.createElement('button');
+        reply.type = 'button';
+        reply.className = 'button button-secondary button-small';
+        reply.textContent = 'Reply';
+        reply.addEventListener('click', () => {
+          $('replyBody').focus();
+          $('replyForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+        actions.appendChild(reply);
+      }
       const forward = document.createElement('button');
       forward.type = 'button';
       forward.className = 'button button-secondary button-small';
@@ -288,9 +367,46 @@ function selectThread(id) {
   });
 }
 
+function selectThread(id) {
+  selectedThreadId = id;
+  const thread = currentThreads.find((item) => item.threadId === id);
+  if (!thread) return;
+  renderThreads();
+  $('noThread').classList.add('hidden');
+  $('threadPanel').classList.remove('hidden');
+  $('threadSubject').textContent = thread.subject || 'Conversation';
+  $('threadRecipient').textContent = 'Loading complete conversation…';
+  $('messageList').textContent = '';
+  const loading = document.createElement('div');
+  loading.className = 'conversation-loading';
+  loading.textContent = 'Loading message details…';
+  $('messageList').appendChild(loading);
+  const requestNumber = ++conversationRequestNumber;
+  authenticatedRpc('getManagedThread', [id]).then((result) => {
+    if (requestNumber !== conversationRequestNumber || selectedThreadId !== id) return;
+    const loaded = result && result.thread ? result.thread : result;
+    if (!loaded) throw new Error('The conversation was empty.');
+    const index = currentThreads.findIndex((item) => item.threadId === id);
+    if (index >= 0) currentThreads[index] = loaded;
+    renderThread(loaded);
+    updateFolderCounts();
+  }).catch((error) => {
+    if (requestNumber !== conversationRequestNumber || selectedThreadId !== id) return;
+    $('messageList').textContent = '';
+    const failed = document.createElement('div');
+    failed.className = 'empty';
+    failed.textContent = 'This conversation could not be loaded. Tap Refresh to try again.';
+    $('messageList').appendChild(failed);
+    showAlert(messageText(error));
+  });
+}
+
 function loadThreads() {
+  if (mailboxLoadInFlight) return;
+  mailboxLoadInFlight = true;
   $('statusLabel').textContent = 'Loading managed conversations…';
   authenticatedRpc('listManagedThreads', []).then((result) => {
+    showAlert('');
     currentThreads = result && result.threads ? result.threads : [];
     currentAllowedSenders = result && result.allowedSenders ? result.allowedSenders : [];
     $('statusLabel').textContent = currentThreads.length + ' conversation' + (currentThreads.length === 1 ? '' : 's');
@@ -308,6 +424,8 @@ function loadThreads() {
     list.appendChild(failed);
     $('allowedSendersList').textContent = '';
     showAlert(messageText(error));
+  }).finally(() => {
+    mailboxLoadInFlight = false;
   });
 }
 

@@ -268,6 +268,9 @@ function listMessageAudits_(payload) {
     .slice(-200)
     .reverse()
     .map((row) => ({
+      timestamp: row.timestamp,
+      direction: row.direction,
+      action: row.action,
       threadId: row.threadId,
       messageId: row.messageId,
       from: row.from,
