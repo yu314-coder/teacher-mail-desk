@@ -1,109 +1,12 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Teacher Mail Desk</title>
-    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="alertContainer" aria-live="polite"></div>
-
-    <main>
-      <section id="loginContainer" class="container">
-        <h2>Login</h2>
-        <p class="muted">Sign in to the teacher mailbox workspace.</p>
-        <form id="loginForm" method="post" target="_top">
-          <input type="hidden" name="action" value="signin" />
-          <div class="form-group">
-            <label for="loginAccountName">Account name:</label>
-            <input id="loginAccountName" name="accountName" type="text" autocomplete="username" required />
-          </div>
-          <div class="form-group">
-            <label for="loginPassword">Portal password:</label>
-            <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="6" required />
-          </div>
-          <div class="form-group">
-            <label for="loginAccessCode">Access code:</label>
-            <input id="loginAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
-          </div>
-          <div class="button-group">
-            <button type="submit">Login</button>
-            <button type="button" id="showRegisterBtn" class="secondary">Register</button>
-          </div>
-        </form>
-      </section>
-
-      <section id="registerContainer" class="container hidden">
-        <h2>Register</h2>
-        <p class="muted">Create the teacher account with the administrator access code.</p>
-        <form id="registerForm" method="post" target="_top">
-          <input type="hidden" name="action" value="signup" />
-          <div class="form-group">
-            <label for="registerAccountName">Account name:</label>
-            <input id="registerAccountName" name="accountName" type="text" autocomplete="username" required />
-          </div>
-          <div class="form-group">
-            <label for="registerPassword">Create portal password:</label>
-            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="6" required />
-          </div>
-          <div class="form-group">
-            <label for="registerAccessCode">Access code:</label>
-            <input id="registerAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
-          </div>
-          <div class="button-group">
-            <button type="submit">Register</button>
-            <button type="button" id="showLoginBtn" class="secondary">Back to Login</button>
-          </div>
-        </form>
-      </section>
-
-      <p class="security-note">The secure Apps Script portal verifies the account name, password, access code, and the teacher’s own Google authorization. GitHub Pages never stores credentials in a Sheet or repository.</p>
-    </main>
-
-    <script>
-      const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxsGA4I2OXwmDNISLNTRx9rDYooIVqCq_hjOPhfwsQo-kWr6Y9VFb3ChDuVEBZ6Z98/exec";
-      const alertContainer = document.getElementById("alertContainer");
-
-      function showAlert(message, type = "error") {
-        alertContainer.textContent = "";
-        const alert = document.createElement("div");
-        alert.className = `alert alert-${type}`;
-        alert.textContent = message;
-        alertContainer.appendChild(alert);
-      }
-
-      function showLogin() {
-        document.getElementById("loginContainer").classList.remove("hidden");
-        document.getElementById("registerContainer").classList.add("hidden");
-      }
-
-      function showRegister() {
-        document.getElementById("loginContainer").classList.add("hidden");
-        document.getElementById("registerContainer").classList.remove("hidden");
-      }
-
-      function submitToSecurePortal(event) {
-        event.preventDefault();
-        if (APP_SCRIPT_URL.includes("REPLACE_WITH_")) {
-          showAlert("The secure Apps Script portal is not connected yet. Complete its deployment before signing in.");
-          return;
-        }
-        const form = event.currentTarget;
-        form.action = APP_SCRIPT_URL;
-        form.submit();
-      }
-
-      document.getElementById("showRegisterBtn").addEventListener("click", showRegister);
-      document.getElementById("showLoginBtn").addEventListener("click", showLogin);
-      document.getElementById("loginForm").addEventListener("submit", (event) => {
-        event.preventDefault();
-        submitToSecurePortal(event);
-      });
-      document.getElementById("registerForm").addEventListener("submit", (event) => {
-        event.preventDefault();
-        submitToSecurePortal(event);
-      });
-    </script>
+    <p>Opening the GitHub Pages teacher mailbox…</p>
+    <script>window.location.replace('../' + window.location.search + window.location.hash);</script>
   </body>
 </html>

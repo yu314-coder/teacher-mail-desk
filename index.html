@@ -8,102 +8,59 @@
   </head>
   <body>
     <div id="alertContainer" aria-live="polite"></div>
-
     <main>
-      <section id="loginContainer" class="container">
-        <h2>Login</h2>
-        <p class="muted">Sign in to the teacher mailbox workspace.</p>
-        <form id="loginForm" method="post" target="_top">
-          <input type="hidden" name="action" value="signin" />
-          <div class="form-group">
-            <label for="loginAccountName">Account name:</label>
-            <input id="loginAccountName" name="accountName" type="text" autocomplete="username" required />
-          </div>
-          <div class="form-group">
-            <label for="loginPassword">Portal password:</label>
-            <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="6" required />
-          </div>
-          <div class="form-group">
-            <label for="loginAccessCode">Access code:</label>
-            <input id="loginAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
-          </div>
-          <div class="button-group">
-            <button type="submit">Login</button>
-            <button type="button" id="showRegisterBtn" class="secondary">Register</button>
-          </div>
-        </form>
-      </section>
+      <form id="loginForm" class="container">
+        <h2>Sign in</h2>
+        <p class="muted">Open the managed teacher mailbox from this GitHub Pages screen.</p>
+        <div class="form-group"><label for="loginAccountName">Account name:</label><input id="loginAccountName" type="text" autocomplete="username" required /></div>
+        <div class="form-group"><label for="loginPassword">Portal password:</label><input id="loginPassword" type="password" autocomplete="current-password" minlength="6" required /></div>
+        <div class="form-group"><label for="loginAccessCode">Access code:</label><input id="loginAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
+        <div class="button-group"><button id="loginButton" type="submit">Sign in</button><button type="button" id="showRegisterBtn" class="secondary">Create account</button></div>
+        <p class="helper">No teacher email is entered here. The secure backend uses the authorized Google mailbox only to perform the managed Gmail actions.</p>
+        <p class="helper"><a id="authorizeLink" href="#" target="_blank" rel="noopener">Authorize the Google mailbox once</a> if this is the first visit.</p>
+      </form>
 
-      <section id="registerContainer" class="container hidden">
-        <h2>Register</h2>
-        <p class="muted">Create the teacher account with the administrator access code.</p>
-        <form id="registerForm" method="post" target="_top">
-          <input type="hidden" name="action" value="signup" />
-          <div class="form-group">
-            <label for="registerAccountName">Account name:</label>
-            <input id="registerAccountName" name="accountName" type="text" autocomplete="username" required />
-          </div>
-          <div class="form-group">
-            <label for="registerPassword">Create portal password:</label>
-            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="6" required />
-          </div>
-          <div class="form-group">
-            <label for="registerAccessCode">Access code:</label>
-            <input id="registerAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="4" required />
-          </div>
-          <div class="button-group">
-            <button type="submit">Register</button>
-            <button type="button" id="showLoginBtn" class="secondary">Back to Login</button>
-          </div>
-        </form>
-      </section>
+      <form id="registerForm" class="container hidden">
+        <h2>Create account</h2>
+        <p class="muted">Create the teacher’s portal account using the administrator access code.</p>
+        <div class="form-group"><label for="registerAccountName">Account name:</label><input id="registerAccountName" type="text" autocomplete="username" required /></div>
+        <div class="form-group"><label for="registerPassword">Portal password:</label><input id="registerPassword" type="password" autocomplete="new-password" minlength="6" required /></div>
+        <div class="form-group"><label for="registerAccessCode">Access code:</label><input id="registerAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
+        <div class="button-group"><button id="registerButton" type="submit">Create account</button><button type="button" id="showLoginBtn" class="secondary">Back to sign in</button></div>
+        <p class="helper">The password and access code are checked by Apps Script and never saved as plain text. The access-code hash is kept in the private Google Sheet.</p>
+      </form>
 
-      <p class="security-note">The secure Apps Script portal verifies the account name, password, access code, and the teacher’s own Google authorization. GitHub Pages never stores credentials in a Sheet or repository.</p>
+      <section id="dashboardContainer" class="hidden">
+        <div class="dashboard-grid">
+          <aside class="container side-panel">
+            <div class="side-heading"><div><p class="eyebrow">WORKSPACE</p><h2>Conversations</h2></div><button id="refreshButton" class="quiet" type="button">Refresh</button></div>
+            <div class="account-chip"><strong>Teacher portal session</strong><span id="connectionStatus">Connecting securely…</span></div>
+            <div class="filter-note"><strong>Managed mailbox boundary</strong><p>Only threads created through this portal are fetched. Financial/account signals and attachments are hidden from viewing.</p></div>
+            <div id="threadList" class="thread-list"><div class="empty">Loading managed conversations…</div></div>
+            <button id="signoutButton" class="secondary full-button" type="button">Sign out</button>
+          </aside>
+
+          <section class="container main-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MAIL DESK</p><h2>Send and receive</h2></div><span id="statusLabel" class="muted small-text"></span></div>
+            <form id="composeForm" class="compose-card">
+              <div class="two-col"><div><label for="composeTo">To</label><input id="composeTo" type="text" placeholder="person@example.com" required /></div><div><label for="composeSubject">Subject</label><input id="composeSubject" type="text" maxlength="180" required /></div></div>
+              <label for="composeBody">Message</label><textarea id="composeBody" maxlength="60000" placeholder="Write a plain-text message." required></textarea>
+              <label for="composeFiles">Optional files</label><input id="composeFiles" type="file" multiple />
+              <p class="helper">Up to 5 files and 20 MB total. Files are sent by Gmail but never shown in the portal or copied into the Sheet.</p>
+              <button class="full-button" type="submit">Send through managed Gmail</button>
+            </form>
+
+            <div id="threadPanel" class="thread-panel hidden">
+              <p class="eyebrow">SELECTED THREAD</p><h2 id="threadSubject">Conversation</h2><p id="threadRecipient" class="muted"></p>
+              <div id="messageList" class="message-list"></div>
+              <form id="replyForm" class="reply-box"><label for="replyBody">Reply</label><textarea id="replyBody" maxlength="60000" required></textarea><label for="replyFiles">Optional files</label><input id="replyFiles" type="file" multiple /><button class="full-button" type="submit">Send reply</button></form>
+              <form id="forwardForm" class="reply-box hidden"><input id="forwardThreadId" type="hidden" /><input id="forwardMessageId" type="hidden" /><h3>Forward selected message</h3><label for="forwardTo">Forward to</label><input id="forwardTo" type="text" placeholder="person@example.com" required /><label for="forwardNote">Optional note</label><textarea id="forwardNote" maxlength="60000"></textarea><label for="forwardFiles">Optional files</label><input id="forwardFiles" type="file" multiple /><button class="full-button" type="submit">Forward message</button></form>
+            </div>
+            <div id="noThread" class="empty">Select a managed conversation after loading the inbox.</div>
+          </section>
+        </div>
+      </section>
     </main>
-
-    <script>
-      const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxsGA4I2OXwmDNISLNTRx9rDYooIVqCq_hjOPhfwsQo-kWr6Y9VFb3ChDuVEBZ6Z98/exec";
-      const alertContainer = document.getElementById("alertContainer");
-
-      function showAlert(message, type = "error") {
-        alertContainer.textContent = "";
-        const alert = document.createElement("div");
-        alert.className = `alert alert-${type}`;
-        alert.textContent = message;
-        alertContainer.appendChild(alert);
-      }
-
-      function showLogin() {
-        document.getElementById("loginContainer").classList.remove("hidden");
-        document.getElementById("registerContainer").classList.add("hidden");
-      }
-
-      function showRegister() {
-        document.getElementById("loginContainer").classList.add("hidden");
-        document.getElementById("registerContainer").classList.remove("hidden");
-      }
-
-      function submitToSecurePortal(event) {
-        event.preventDefault();
-        if (APP_SCRIPT_URL.includes("REPLACE_WITH_")) {
-          showAlert("The secure Apps Script portal is not connected yet. Complete its deployment before signing in.");
-          return;
-        }
-        const form = event.currentTarget;
-        form.action = APP_SCRIPT_URL;
-        form.submit();
-      }
-
-      document.getElementById("showRegisterBtn").addEventListener("click", showRegister);
-      document.getElementById("showLoginBtn").addEventListener("click", showLogin);
-      document.getElementById("loginForm").addEventListener("submit", (event) => {
-        event.preventDefault();
-        submitToSecurePortal(event);
-      });
-      document.getElementById("registerForm").addEventListener("submit", (event) => {
-        event.preventDefault();
-        submitToSecurePortal(event);
-      });
-    </script>
+    <script src="frontend.js"></script>
   </body>
 </html>

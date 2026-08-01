@@ -17,6 +17,7 @@ const LOGGER_SHEETS = {
   audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason'] },
   messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result'] },
   authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt'] },
+  security: { name: 'Security', headers: ['setting', 'value'] },
 };
 
 /**
@@ -52,6 +53,9 @@ function initializeLogger() {
   props.deleteProperty('SETUP_SHEET_ID');
   props.deleteProperty('SETUP_ACCESS_CODE');
   ensureSheets_();
+  setSecurityValue_('ACCESS_CODE_SALT', accessSalt);
+  setSecurityValue_('ACCESS_CODE_HASH', hashWithPepper_(accessCode, accessSalt, hashPepper));
+  setSecurityValue_('CONFIGURED_AT', new Date().toISOString());
   return {
     ok: true,
     message: 'Logger initialized. Copy LOGGER_SECRET into the portal project properties, then deploy both projects.',
@@ -71,6 +75,7 @@ function doPost(e) {
 }
 
 function doGet() {
+  ensureSheets_();
   return json_({ ok: true, service: 'Teacher Mail Desk logger', status: 'private' });
 }
 
@@ -104,10 +109,7 @@ function register_(payload) {
   if (accessCode.length < 4) throw new Error('The access code is invalid.');
   if (findUserByAccountName_(accountName)) throw new Error('This account name is already registered.');
   if (findUserByEmail_(email)) throw new Error('This Google account is already registered.');
-  const props = PropertiesService.getScriptProperties();
-  if (hash_(accessCode, String(props.getProperty('ACCESS_CODE_SALT') || '')) !== props.getProperty('ACCESS_CODE_HASH')) {
-    throw new Error('The access code is invalid.');
-  }
+  verifyAccessCode_(accessCode);
 
   const salt = Utilities.getUuid();
   const passwordHash = hash_(password, salt);
@@ -151,7 +153,9 @@ function login_(payload) {
 function verifyAccessCode_(accessCode) {
   if (accessCode.length < 4) throw new Error('The access code is invalid.');
   const props = PropertiesService.getScriptProperties();
-  if (hash_(accessCode, String(props.getProperty('ACCESS_CODE_SALT') || '')) !== props.getProperty('ACCESS_CODE_HASH')) {
+  const salt = securityValue_('ACCESS_CODE_SALT') || String(props.getProperty('ACCESS_CODE_SALT') || '');
+  const expected = securityValue_('ACCESS_CODE_HASH') || String(props.getProperty('ACCESS_CODE_HASH') || '');
+  if (hash_(accessCode, salt) !== expected) {
     throw new Error('The access code is invalid.');
   }
 }
@@ -289,6 +293,7 @@ function findUserByEmail_(email) {
 
 function ensureSheets_() {
   Object.keys(LOGGER_SHEETS).forEach((key) => sheetFor_(key));
+  migrateSecurityProperties_();
 }
 
 function sheetFor_(key) {
@@ -321,6 +326,29 @@ function migrateUsersSchema_(sheet) {
     }
     sheet.getRange(1, 1, 1, targetHeaders.length).setValues([targetHeaders]);
   }
+}
+
+function migrateSecurityProperties_() {
+  const props = PropertiesService.getScriptProperties();
+  const salt = String(props.getProperty('ACCESS_CODE_SALT') || '').trim();
+  const hash = String(props.getProperty('ACCESS_CODE_HASH') || '').trim();
+  if (!salt || !hash) return;
+  if (!securityValue_('ACCESS_CODE_SALT')) setSecurityValue_('ACCESS_CODE_SALT', salt);
+  if (!securityValue_('ACCESS_CODE_HASH')) setSecurityValue_('ACCESS_CODE_HASH', hash);
+  const configuredAt = String(props.getProperty('CONFIGURED_AT') || '').trim();
+  if (configuredAt && !securityValue_('CONFIGURED_AT')) setSecurityValue_('CONFIGURED_AT', configuredAt);
+}
+
+function securityValue_(setting) {
+  const row = readRows_(sheetFor_('security')).find((item) => item.setting === setting);
+  return row ? String(row.value || '') : '';
+}
+
+function setSecurityValue_(setting, value) {
+  const sheet = sheetFor_('security');
+  const existing = readRows_(sheet).find((item) => item.setting === setting);
+  if (existing) updateRow_(sheet, existing.row, existing.headers, { value: String(value || '') });
+  else sheet.appendRow([setting, String(value || '')]);
 }
 
 function readRows_(sheet) {

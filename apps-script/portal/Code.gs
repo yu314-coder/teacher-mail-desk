@@ -15,7 +15,12 @@ const PORTAL = {
   sessionProperty: 'PORTAL_SESSION_TOKEN',
 };
 
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter && e.parameter.bridge === '1') {
+    return HtmlService.createHtmlOutputFromFile('Bridge')
+      .setTitle('Teacher Mail Desk bridge')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Teacher Mail Desk')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -189,6 +194,46 @@ function replyToThread(threadId, body, attachments) {
   recordAudit_(email, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
   recordMessageAudit_(email, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, [recipient], replySubject, cleanBody, sent, safeAttachments);
+  return { ok: true, sent: true };
+}
+
+function forwardMessage(threadId, messageId, to, note, attachments) {
+  const email = requireSession_();
+  const allowed = allowedThreadMap_(email);
+  const id = cleanText_(threadId, 160);
+  const record = allowed[id];
+  if (!record) throw new Error('That conversation was not started through this portal.');
+  const recipients = parseRecipients_(to);
+  const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
+  const source = (thread.messages || []).find((message) => String(message.id || '') === cleanText_(messageId, 160));
+  if (!source) throw new Error('The selected message could not be found.');
+  const sourceSubject = header_(source, 'Subject') || 'Teacher Mail Desk conversation';
+  const sourceBody = plainBody_(source.payload);
+  if (!sourceBody || hasAttachment_(source.payload) || hasFinancialPattern_(sourceSubject + '\n' + sourceBody)) {
+    throw new Error('This message is hidden by the privacy filter and cannot be forwarded.');
+  }
+  const cleanNote = cleanText_(note, PORTAL.maxBodyChars);
+  const forwardedBody = [
+    cleanNote,
+    cleanNote ? '' : null,
+    '---------- Forwarded message ----------',
+    'From: ' + (header_(source, 'From') || 'Sender hidden'),
+    'Date: ' + (header_(source, 'Date') || ''),
+    'Subject: ' + sourceSubject,
+    '',
+    sourceBody,
+  ].filter((line) => line !== null).join('\n');
+  assertSafeContent_(sourceSubject + '\n' + forwardedBody);
+  const safeAttachments = normalizeAttachments_(attachments);
+  const forwardSubject = /^fwd:/i.test(sourceSubject) ? sourceSubject : 'Fwd: ' + sourceSubject;
+  const sent = Gmail.Users.Messages.send({ raw: rawMessage_(recipients, forwardSubject, forwardedBody, [], safeAttachments) }, 'me');
+  if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
+  ensureManagedLabel_();
+  addManagedLabel_(sent.threadId);
+  loggerCall_('recordThread', { email, threadId: sent.threadId, recipient: recipients.join(', ') });
+  recordAudit_(email, 'forward', sent.threadId, sent.id || '', 'success', '');
+  recordMessageAudit_(email, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
+  forwardAuditCopy_(email, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
   return { ok: true, sent: true };
 }
 

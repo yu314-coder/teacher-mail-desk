@@ -18,7 +18,7 @@ body {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
-main { width: min(560px, 100%); margin: 7vh auto 0; }
+main { width: min(1120px, 100%); margin: 7vh auto 0; }
 
 #alertContainer { min-height: 0; }
 
@@ -130,6 +130,48 @@ button.secondary {
 .alert-success { border-left-color: #28a745; background: #d4edda; color: #155724; }
 .hidden { display: none !important; }
 
+.dashboard-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; }
+.side-panel, .main-panel { width: auto; min-width: 0; }
+.side-panel { min-height: 650px; }
+.side-heading, .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.side-heading h2, .panel-heading h2 { margin-bottom: 0; border-bottom: 0; padding-bottom: 0; font-size: 1.5rem; }
+.eyebrow { margin-bottom: 7px; color: #667eea; font-size: .7rem; font-weight: 850; letter-spacing: .15em; }
+.quiet { flex: 0 0 auto; min-height: 36px; padding: 8px 12px; color: #495057; background: #eef1f8; box-shadow: none; }
+.quiet:hover { color: #fff; background: linear-gradient(135deg, #667eea, #764ba2); }
+.account-chip { margin: 18px 0; padding: 13px; border: 1px solid #e9ecef; border-radius: 12px; background: #f7f8fc; }
+.account-chip strong, .account-chip span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-chip strong { font-size: .84rem; }
+.account-chip span { margin-top: 5px; color: #6c757d; font-size: .75rem; }
+.filter-note { margin: 16px 0; padding: 13px; border-radius: 12px; color: #4d477d; background: #f0efff; }
+.filter-note strong { display: block; margin-bottom: 5px; font-size: .82rem; }
+.filter-note p { margin: 0; font-size: .76rem; line-height: 1.5; }
+.thread-list { display: grid; gap: 7px; }
+.thread-button { width: 100%; padding: 11px; border: 1px solid transparent; border-radius: 10px; color: #333; text-align: left; background: transparent; box-shadow: none; }
+.thread-button:hover, .thread-button.active { color: #2c3e50; background: #f1f2ff; box-shadow: none; transform: none; }
+.thread-button strong, .thread-button span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-button strong { font-size: .82rem; }
+.thread-button span { margin-top: 4px; color: #6c757d; font-size: .74rem; }
+.empty { padding: 28px 12px; color: #6c757d; font-size: .82rem; line-height: 1.55; text-align: center; }
+.full-button { width: 100%; margin-top: 12px; }
+.main-panel { padding: 40px; }
+.compose-card { margin-top: 20px; padding: 17px; border: 1px solid #e9ecef; border-radius: 12px; background: #f8f9fd; }
+.compose-card textarea, .reply-box textarea { min-height: 118px; background: #fff; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.small-text { font-size: .78rem; text-align: right; }
+.thread-panel { margin-top: 22px; padding-top: 22px; border-top: 1px solid #e9ecef; }
+.thread-panel > h2 { margin-bottom: 4px; }
+.message-list { display: grid; gap: 10px; margin-top: 17px; }
+.message { padding: 13px 14px; border: 1px solid #e9ecef; border-radius: 12px; background: white; }
+.message.mine { border-color: #c7d0fb; background: #f5f6ff; }
+.message-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 7px; color: #6c757d; font-size: .72rem; }
+.message-body { white-space: pre-wrap; line-height: 1.55; font-size: .88rem; }
+.blocked-message { color: #766018; background: #fff7dc; border-color: #f0dfaa; font-size: .8rem; line-height: 1.5; }
+.message-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.button-small { flex: 0 0 auto; min-height: 34px; padding: 7px 12px; font-size: .78rem; }
+.reply-box { margin-top: 17px; padding-top: 17px; border-top: 1px solid #e9ecef; }
+.reply-box h3 { margin-bottom: 4px; color: #2c3e50; }
+#portalBridge { position: fixed; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; left: -10px; bottom: -10px; }
+
 @media (max-width: 600px) {
   body { padding: 10px; }
   main { margin-top: 3vh; }
@@ -137,4 +179,15 @@ button.secondary {
   h2 { font-size: 1.6em; }
   .button-group { flex-direction: column; }
   button { width: 100%; }
+}
+
+@media (max-width: 800px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .side-panel { min-height: 0; }
+  .main-panel { padding: 24px 20px; }
+}
+
+@media (max-width: 620px) {
+  .two-col { grid-template-columns: 1fr; }
+  .main-panel { padding: 24px 20px; }
 }
