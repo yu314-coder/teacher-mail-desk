@@ -219,15 +219,16 @@ function getManagedThread(sessionToken, threadId) {
   if (record && audits.length) {
     try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
   }
+  const hasBlankReceivedAudit = audits.some((audit) => String(audit.direction || '').toLowerCase() === 'received' && !String(audit.body || '').trim());
   // Portal-sent messages are already privacy-filtered and stored in the
   // private Sheet logger. Use that copy immediately instead of waiting on a
   // second Gmail payload request just to open a sent conversation.
-  if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits, allowedSenders) };
+  if (record && audits.length && !hasBlankReceivedAudit) return { ok: true, thread: threadViewFromAudits_(email, record, audits, allowedSenders) };
   // A discovered Inbox thread has no portal audit row by design. Fetch its
   // complete Gmail payload once now so opening it shows the actual sender,
   // headers, body, and safe attachment metadata immediately. The previous
   // path returned a placeholder and then made a second slow GmailApp call.
-  if (record && record.inbound) {
+  if (record && (record.inbound || hasBlankReceivedAudit)) {
     const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
     const view = threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(audits));
     cacheReceivedThread_(email, sessionToken, view);
@@ -688,7 +689,14 @@ function messageView_(message, accountEmail, audit) {
   const from = header_(message, 'From') || String(audit && audit.from || '');
   const date = header_(message, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : String(audit && audit.timestamp || ''));
   const hasAttachment = hasAttachment_(message.payload);
-  const body = plainBody_(message.payload) || String(audit && audit.body || '');
+  let body = plainBody_(message.payload) || String(audit && audit.body || '');
+  // A few multipart Gmail messages expose attachment metadata but omit the
+  // decoded text in the Advanced Gmail payload. Ask GmailApp for the plain
+  // text only in that rare empty-body case; normal cached messages never take
+  // this path.
+  if (!body && message.id) {
+    try { body = String(GmailApp.getMessageById(String(message.id)).getPlainBody() || ''); } catch (ignored) {}
+  }
   const attachments = attachmentSummaries_(message.payload, audit, String(message.id || ''));
   const attachmentNames = attachments.map((file) => file.name + ' ' + file.mimeType).join('\n');
   if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentNames)) {
@@ -966,6 +974,7 @@ function mimeHeader_(value) {
 
 function plainBody_(payload) {
   if (!payload) return '';
+  if (payload.filename) return '';
   const parts = payload.parts || [];
   if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) return decodeBase64Url_(payload.body.data);
   for (const part of parts) {
@@ -973,6 +982,7 @@ function plainBody_(payload) {
     if (text) return text;
   }
   if (payload.mimeType === 'text/html' && payload.body && payload.body.data) return stripHtml_(decodeBase64Url_(payload.body.data));
+  if (payload.body && payload.body.data) return decodeBase64Url_(payload.body.data);
   return '';
 }
 
