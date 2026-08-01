@@ -8,23 +8,13 @@ const bridgeQueue = [];
 let bridgeReady = false;
 let bridgeRequestNumber = 0;
 const BRIDGE_TIMEOUT_MS = 45000;
-let backendWarmupStarted = false;
 
 bridgeFrame.id = 'portalBridge';
 bridgeFrame.name = 'teacherMailDeskBridgeTarget';
 bridgeFrame.title = 'Secure Apps Script connection';
 bridgeFrame.setAttribute('aria-hidden', 'true');
 bridgeFrame.src = APP_SCRIPT_URL + '?bridge=1&nonce=' + encodeURIComponent(bridgeNonce);
-bridgeFrame.addEventListener('load', () => {
-  bridgeReady = true;
-  flushBridgeQueue();
-  // Warm the private Apps Script portal while the teacher is still on the
-  // sign-in screen so the first mailbox request avoids a cold-start delay.
-  if (!backendWarmupStarted) {
-    backendWarmupStarted = true;
-    bridgeRpc('getAppState', []).catch(() => {});
-  }
-});
+bridgeFrame.addEventListener('load', () => { bridgeReady = true; flushBridgeQueue(); });
 document.body.appendChild(bridgeFrame);
 
 function messageText(error) {
