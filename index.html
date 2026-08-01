@@ -3,72 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="A private teacher mail desk for managed email conversations." />
-    <title>Teacher Mail Desk</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <title>Teacher account</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17251f; background: #f4f8f4; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+      main { width: min(440px, 100%); padding: 30px; border: 1px solid #dce8e0; border-radius: 22px; background: #fff; box-shadow: 0 18px 50px rgba(31, 71, 52, .12); }
+      h1 { margin: 0 0 6px; font-size: 1.55rem; letter-spacing: -.04em; }
+      p { margin: 0 0 20px; color: #6a7b74; line-height: 1.5; font-size: .9rem; }
+      label { display: block; margin: 14px 0 6px; color: #245d45; font-size: .78rem; font-weight: 750; }
+      input { width: 100%; padding: 12px 13px; border: 1px solid #dce8e0; border-radius: 11px; font: inherit; outline: none; }
+      input:focus { border-color: #73aa88; box-shadow: 0 0 0 4px rgba(115, 170, 136, .14); }
+      button { width: 100%; margin-top: 20px; padding: 12px 14px; border: 0; border-radius: 11px; color: #fff; background: #236b4d; font: inherit; font-weight: 800; cursor: pointer; }
+      button:hover { background: #174735; }
+      .status { min-height: 20px; margin: 12px 0 0; color: #a43d3d; font-size: .78rem; line-height: 1.4; }
+      .status.ok { color: #236b4d; }
+      .security { margin-top: 18px; color: #7b8a84; font-size: .72rem; line-height: 1.45; }
+    </style>
   </head>
   <body>
-    <main class="page-shell">
-      <section class="hero-card">
-        <div class="eyebrow"><span class="status-dot"></span> PRIVATE TEACHER PORTAL</div>
-        <h1>One calm place for the conversations that matter.</h1>
-        <p class="lede">
-          Send, receive, and reply to managed Gmail conversations without exposing the rest of a mailbox.
-          The portal only displays threads that were started through this site.
-        </p>
-        <div class="trust-row" aria-label="Privacy commitments">
-          <span>Google sign-in</span>
-          <span>Managed threads only</span>
-          <span>Attachments hidden</span>
-          <span>Financial-content filter</span>
-        </div>
-      </section>
-
-      <section class="portal-card" aria-labelledby="portal-title">
-        <div class="portal-heading">
-          <div>
-            <p class="section-kicker">SECURE WORKSPACE</p>
-            <h2 id="portal-title">Teacher Mail Desk</h2>
-          </div>
-          <a id="open-portal" class="button button-secondary" href="#" target="_blank" rel="noopener">Open in a new tab</a>
-        </div>
-
-        <div id="setup-warning" class="notice notice-warning" hidden>
-          <strong>Portal URL not configured.</strong>
-          <span>The GitHub Pages shell is ready. Add the deployed Apps Script portal URL in <code>pages/index.html</code> before publishing.</span>
-        </div>
-
-        <iframe
-          id="portal-frame"
-          title="Teacher Mail Desk secure portal"
-          loading="eager"
-          referrerpolicy="no-referrer"
-          hidden
-        ></iframe>
-      </section>
-
-      <section class="footer-note">
-        <p><strong>How the boundary works:</strong> Gmail is accessed by the teacher's own Google account. The backend records an allowlist of portal-created thread IDs, and it refuses to display unrelated mailbox messages.</p>
-        <p class="small-print">Passwords are never saved in this repository or as plain text in the Sheet. The Sheet is limited to salted hashes, thread allowlists, and audit metadata.</p>
-      </section>
+    <main>
+      <h1>Teacher account</h1>
+      <p>Create an account to use the managed college-application mailbox.</p>
+      <form id="account-form">
+        <label for="name">Name</label>
+        <input id="name" name="name" autocomplete="name" required />
+        <label for="email">Google account email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required />
+        <label for="password">Portal password</label>
+        <input id="password" name="password" type="password" minlength="12" autocomplete="new-password" required />
+        <label for="access-code">Access code</label>
+        <input id="access-code" name="access-code" type="password" minlength="12" autocomplete="one-time-code" required />
+        <button type="submit">Create teacher account</button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+      <div class="security">Account creation is completed by the private Apps Script backend. Passwords must never be shared in this page, GitHub, or a Sheet as plain text.</div>
     </main>
     <script>
-      // This URL is public configuration, not a secret. Never put a password, token, or Sheet ID here.
       const APP_SCRIPT_URL = "https://script.google.com/macros/s/REPLACE_WITH_PORTAL_DEPLOYMENT_ID/exec";
-      const isConfigured = APP_SCRIPT_URL && !APP_SCRIPT_URL.includes("REPLACE_WITH_");
-      const frame = document.getElementById("portal-frame");
-      const openPortal = document.getElementById("open-portal");
-      const warning = document.getElementById("setup-warning");
-
-      if (isConfigured) {
-        frame.src = APP_SCRIPT_URL;
-        frame.hidden = false;
-        openPortal.href = APP_SCRIPT_URL;
-      } else {
-        warning.hidden = false;
-        openPortal.setAttribute("aria-disabled", "true");
-        openPortal.addEventListener("click", (event) => event.preventDefault());
-      }
+      const form = document.getElementById("account-form");
+      const status = document.getElementById("status");
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (APP_SCRIPT_URL.includes("REPLACE_WITH_")) {
+          status.textContent = "The secure account backend is not connected yet.";
+          return;
+        }
+        status.textContent = "Open the secure Apps Script account page to finish registration.";
+        status.className = "status ok";
+        window.location.href = APP_SCRIPT_URL;
+      });
     </script>
   </body>
 </html>
