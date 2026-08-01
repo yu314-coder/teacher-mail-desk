@@ -81,7 +81,7 @@ function bridgePost_(parameters) {
     case 'syncManagedInbox': result = syncManagedInbox(args[0]); break;
     case 'getManagedThread': result = getManagedThread(args[0], args[1]); break;
     case 'getManagedThreadRemote': result = getManagedThreadRemote(args[0], args[1]); break;
-    case 'downloadAttachment': result = downloadAttachment(args[0], args[1], args[2], args[3]); break;
+    case 'downloadAttachment': result = downloadAttachment(args[0], args[1], args[2], args[3], args[4]); break;
     case 'sendMessage': result = sendMessage(args[0], args[1], args[2], args[3], args[4]); break;
     case 'replyToThread': result = replyToThread(args[0], args[1], args[2], args[3]); break;
     case 'forwardMessage': result = forwardMessage(args[0], args[1], args[2], args[3], args[4], args[5]); break;
@@ -793,12 +793,13 @@ function standardBase64_(value) {
   return Utilities.base64Encode(Utilities.base64DecodeWebSafe(String(value || '')));
 }
 
-function downloadAttachment(sessionToken, threadId, messageId, attachmentId) {
+function downloadAttachment(sessionToken, threadId, messageId, attachmentId, attachmentName) {
   const email = requireSession_(sessionToken);
   const id = cleanText_(threadId, 160);
   const mid = cleanText_(messageId, 160);
   const aid = cleanText_(attachmentId, 240);
-  if (!id || !mid || !aid) throw new Error('The received file could not be identified.');
+  const name = cleanText_(attachmentName, 160);
+  if (!id || !mid || (!aid && !name)) throw new Error('The received file could not be identified.');
   const record = allowedThreadMap_(email)[id];
   if (!record) throw new Error('That conversation was not started through this portal.');
   const message = Gmail.Users.Messages.get('me', mid, { format: 'full' });
@@ -807,8 +808,9 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId) {
   if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email).has(sourceFrom)) throw new Error('This sender is not on the AllowedSenders list.');
   const subject = header_(message, 'Subject');
   const body = plainBody_(message.payload);
-  const part = findAttachmentPart_(message.payload, aid, '');
-  if (!part || hasFinancialPattern_(subject + '\n' + body + '\n' + part.filename + '\n' + part.mimeType)) {
+  const part = findAttachmentPart_(message.payload, aid, '') || findAttachmentPart_(message.payload, '', name);
+  if (!part) throw new Error('This received file is no longer available.');
+  if (hasFinancialPattern_(subject + '\n' + body + '\n' + part.filename + '\n' + part.mimeType)) {
     throw new Error('This file is hidden by the privacy filter.');
   }
   let data = part.body && part.body.data;

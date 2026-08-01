@@ -278,7 +278,7 @@ function appendDetailRow(container, label, value) {
 
 function downloadReceivedAttachment(threadId, messageId, file, button) {
   setBusy(button, true, 'Downloading…');
-  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId]).then((result) => {
+  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId, file.name]).then((result) => {
     const binary = atob(String(result && result.base64 || ''));
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
