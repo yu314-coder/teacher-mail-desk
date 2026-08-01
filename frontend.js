@@ -366,6 +366,12 @@ function renderThread(thread) {
     }
     list.appendChild(card);
   });
+  if (!(thread.messages || []).length) {
+    const pending = document.createElement('div');
+    pending.className = 'conversation-loading';
+    pending.textContent = thread.needsRemoteCheck ? 'Checking the managed Gmail conversation for received messages…' : 'No visible message content is available.';
+    list.appendChild(pending);
+  }
 }
 
 function selectThread(id) {

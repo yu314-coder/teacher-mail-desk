@@ -193,6 +193,12 @@ function getManagedThread(sessionToken, threadId) {
   // private Sheet logger. Use that copy immediately instead of waiting on a
   // second Gmail payload request just to open a sent conversation.
   if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits) };
+  if (record) {
+    const summary = threadSummary_(record, email, []);
+    summary.needsRemoteCheck = true;
+    summary.messageCount = 0;
+    return { ok: true, thread: summary };
+  }
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
 
   // Older portal versions could label a managed thread before the Sheet row
@@ -696,7 +702,11 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
       const response = Gmail.Users.Threads.list('me', { q: 'from:' + sender, maxResults: 20 });
       (response.threads || []).forEach((thread) => {
         const threadId = String(thread.id || '').trim();
-        if (!threadId || byId[threadId]) return;
+        if (!threadId) return;
+        if (byId[threadId]) {
+          byId[threadId].inbound = true;
+          return;
+        }
         const record = { threadId, recipient: sender, createdAt: '', lastSeenAt: '', inbound: true };
         byId[threadId] = record;
         try { loggerCall_('recordThread', { email, threadId, recipient: sender }); } catch (ignored) {}
