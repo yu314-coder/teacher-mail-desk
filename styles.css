@@ -239,6 +239,7 @@ button.secondary:disabled:active {
 .message.mine { border-color: #c7d0fb; background: #f5f6ff; }
 .message-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 7px; color: #6c757d; font-size: .72rem; }
 .message-body { white-space: pre-wrap; line-height: 1.55; font-size: .88rem; }
+.message-attachment-note { margin-top: 10px; color: #6b7280; font-size: 12px; }
 .blocked-message { color: #766018; background: #fff7dc; border-color: #f0dfaa; font-size: .8rem; line-height: 1.5; }
 .message-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .button-small { flex: 0 0 auto; min-height: 34px; padding: 7px 12px; font-size: .78rem; }

@@ -266,6 +266,14 @@ function selectThread(id) {
       const body = document.createElement('div');
       body.className = 'message-body';
       body.textContent = message.body || '';
+      if (message.attachment) {
+        const attachmentNote = document.createElement('div');
+        attachmentNote.className = 'message-attachment-note';
+        attachmentNote.textContent = 'Attachment present. File contents stay in the managed Gmail account.';
+        card.append(meta, body, attachmentNote);
+      } else {
+        card.append(meta, body);
+      }
       const actions = document.createElement('div');
       actions.className = 'message-actions';
       const forward = document.createElement('button');
@@ -274,7 +282,7 @@ function selectThread(id) {
       forward.textContent = 'Forward';
       forward.addEventListener('click', () => prepareForward(thread.threadId, message.id));
       actions.appendChild(forward);
-      card.append(meta, body, actions);
+      card.append(actions);
     }
     list.appendChild(card);
   });

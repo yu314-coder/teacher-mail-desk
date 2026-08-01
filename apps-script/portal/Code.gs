@@ -158,14 +158,25 @@ function signOut(sessionToken) {
 }
 
 function listManagedThreads(sessionToken) {
-  const email = requireSession_(sessionToken);
-  const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
-  const allowed = managedThreadRecords_(email, allowedSenders).slice(0, PORTAL.maxThreads);
+  const email = backendEmail_();
+  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const allowedSenders = new Set(snapshot.allowedSenders || []);
+  const auditByMessageId = {};
+  const auditByThreadId = {};
+  (snapshot.messages || []).forEach((audit) => {
+    if (!audit) return;
+    if (audit.messageId) auditByMessageId[String(audit.messageId)] = audit;
+    if (audit.threadId) {
+      const threadAudits = auditByThreadId[String(audit.threadId)] || (auditByThreadId[String(audit.threadId)] = []);
+      threadAudits.push(audit);
+    }
+  });
+  const allowed = managedThreadRecords_(email, allowedSenders, snapshot.threads || []).slice(0, PORTAL.maxThreads);
   const result = [];
   allowed.forEach((record) => {
     try {
       const thread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
-      const view = threadView_(thread, email, record, allowedSenders);
+      const view = threadView_(thread, email, record, allowedSenders, { byMessageId: auditByMessageId, byThreadId: auditByThreadId });
       result.push(view);
     } catch (error) {
       // A deleted or inaccessible thread remains in the audit log but is not
@@ -384,13 +395,20 @@ function addManagedLabel_(threadId) {
   Gmail.Users.Threads.modify({ addLabelIds: [labelId] }, 'me', threadId);
 }
 
-function threadView_(thread, email, record, allowedSenders) {
+function threadView_(thread, email, record, allowedSenders, auditByMessageId) {
   const messages = (thread.messages || [])
     .filter((message) => {
       const from = addressFrom_(header_(message, 'From'));
       return !from || from === email || allowedSenders.has(from);
     })
-    .map((message) => messageView_(message, email));
+    .map((message, index) => {
+      const auditIndex = auditByMessageId || {};
+      const byMessageId = auditIndex.byMessageId || auditIndex;
+      const byThreadId = auditIndex.byThreadId || {};
+      const threadAudits = byThreadId[String(record.threadId)] || [];
+      const audit = byMessageId[String(message.id || '')] || threadAudits[index] || threadAudits[0];
+      return messageView_(message, email, audit);
+    });
   const visible = messages.filter((message) => !message.blocked && message.body);
   const lastVisible = visible.length ? visible[visible.length - 1] : null;
   const inbound = messages.filter((message) => !message.mine);
@@ -412,18 +430,28 @@ function threadView_(thread, email, record, allowedSenders) {
   };
 }
 
-function messageView_(message, accountEmail) {
-  const subject = header_(message, 'Subject');
-  const from = header_(message, 'From');
+function messageView_(message, accountEmail, audit) {
+  const subject = header_(message, 'Subject') || String(audit && audit.subject || '');
+  const from = header_(message, 'From') || String(audit && audit.from || '');
   const date = header_(message, 'Date');
   const hasAttachment = hasAttachment_(message.payload);
-  const body = plainBody_(message.payload);
-  if (hasAttachment || hasFinancialPattern_(subject + '\n' + body)) {
-    return { id: message.id, blocked: true, date: date || '', from: '', subject: '', body: '' };
+  const body = plainBody_(message.payload) || String(audit && audit.body || '');
+  if (hasFinancialPattern_(subject + '\n' + body)) {
+    return {
+      id: message.id,
+      blocked: true,
+      attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
+      date: date || '',
+      from: '',
+      subject: '',
+      body: '',
+      mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
+    };
   }
   return {
     id: message.id,
     blocked: false,
+    attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
     date: date || '',
     from: addressFrom_(from) || (from || ''),
     mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
@@ -444,8 +472,8 @@ function allowedSendersFor_(email) {
   return new Set(loggerCall_('listAllowedSenders', { email }));
 }
 
-function managedThreadRecords_(email, allowedSenders) {
-  const records = loggerCall_('listThreads', { email }).slice(-100).reverse();
+function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
+  const records = (preloadedRecords || loggerCall_('listThreads', { email })).slice(-100).reverse();
   const byId = {};
   records.forEach((record) => {
     if (record && record.threadId) byId[record.threadId] = record;

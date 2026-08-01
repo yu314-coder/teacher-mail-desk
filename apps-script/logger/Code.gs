@@ -90,6 +90,7 @@ function handleOperation_(operation, payload) {
     case 'login': return login_(payload);
     case 'logout': return logout_(payload);
     case 'authorize': return authorize_(payload);
+    case 'mailboxSnapshot': return mailboxSnapshot_(payload);
     case 'recordThread': return recordThread_(payload);
     case 'listThreads': return listThreads_(payload);
     case 'listAllowedSenders': return listAllowedSenders_(payload);
@@ -215,6 +216,16 @@ function authorize_(payload) {
   throw new Error('The portal session is not valid.');
 }
 
+function mailboxSnapshot_(payload) {
+  const email = normalizedEmail_(payload.email);
+  authorize_(payload);
+  return {
+    threads: listThreads_({ email }),
+    allowedSenders: listAllowedSenders_({ email }),
+    messages: listMessageAudits_({ email }),
+  };
+}
+
 function logout_(payload) {
   const email = normalizedEmail_(payload.email);
   const token = String(payload.sessionToken || '');
@@ -248,6 +259,23 @@ function listThreads_(payload) {
     .slice(-100)
     .reverse()
     .map((row) => ({ threadId: row.threadId, recipient: row.recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt }));
+}
+
+function listMessageAudits_(payload) {
+  const email = normalizedEmail_(payload.email);
+  return readRows_(sheetFor_('messages'))
+    .filter((row) => row.email === email && row.result === 'success')
+    .slice(-200)
+    .reverse()
+    .map((row) => ({
+      threadId: row.threadId,
+      messageId: row.messageId,
+      from: row.from,
+      to: row.to,
+      subject: row.subject,
+      body: row.body,
+      attachmentMetadata: row.attachmentMetadata,
+    }));
 }
 
 function listAllowedSenders_(payload) {
