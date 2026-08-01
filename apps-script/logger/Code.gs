@@ -115,11 +115,21 @@ function register_(payload) {
 function login_(payload) {
   const email = normalizedEmail_(payload.email);
   const password = String(payload.password || '');
+  const accessCode = String(payload.accessCode || '');
   const user = findUser_(email);
   if (!user || user.status !== 'active') throw new Error('No active portal account exists for this Google account.');
   if (hash_(password, user.salt) !== user.passwordHash) throw new Error('The password is incorrect.');
+  verifyAccessCode_(accessCode);
   updateRow_(sheetFor_('users'), user.row, user.headers, { lastLoginAt: new Date() });
   return createSession_(email);
+}
+
+function verifyAccessCode_(accessCode) {
+  if (accessCode.length < 12) throw new Error('The access code is invalid.');
+  const props = PropertiesService.getScriptProperties();
+  if (hash_(accessCode, String(props.getProperty('ACCESS_CODE_SALT') || '')) !== props.getProperty('ACCESS_CODE_HASH')) {
+    throw new Error('The access code is invalid.');
+  }
 }
 
 function authorize_(payload) {

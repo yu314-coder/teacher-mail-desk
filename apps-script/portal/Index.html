@@ -126,8 +126,10 @@
             <input id="signin-email" type="email" readonly placeholder="Loading Google account…">
             <label for="signin-password">Portal password</label>
             <input id="signin-password" type="password" minlength="12" autocomplete="current-password" required>
+            <label for="signin-access-code">Access code</label>
+            <input id="signin-access-code" type="password" minlength="12" autocomplete="one-time-code" required>
             <div class="form-actions"><button class="button button-primary" type="submit">Sign in securely</button></div>
-            <p class="helper">Google account sign-in is required first. The portal password is checked by the private Sheet backend and is never stored as plain text.</p>
+            <p class="helper">The Google account, portal password, and access code are checked before the mailbox is opened. Passwords and codes are never stored as plain text.</p>
           </form>
           <form id="signup-form" hidden>
             <label for="signup-email">Google account</label>
@@ -327,7 +329,7 @@
       $('signin-form').addEventListener('submit', (event) => {
         event.preventDefault();
         const button = event.submitter; setBusy(button, true, 'Signing in…'); showNotice('auth-notice', '', false);
-        rpc('signIn', [$('signin-password').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
+        rpc('signIn', [$('signin-password').value, $('signin-access-code').value], (result) => { setBusy(button, false); currentEmail = result.email; openDashboard(); }, (error) => { setBusy(button, false); showError(error); });
       });
       $('signup-form').addEventListener('submit', (event) => {
         event.preventDefault();

@@ -1,57 +1,112 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Teacher account</title>
-    <style>
-      :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17251f; background: #f4f8f4; }
-      * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; }
-      main { width: min(440px, 100%); padding: 30px; border: 1px solid #dce8e0; border-radius: 22px; background: #fff; box-shadow: 0 18px 50px rgba(31, 71, 52, .12); }
-      h1 { margin: 0 0 6px; font-size: 1.55rem; letter-spacing: -.04em; }
-      p { margin: 0 0 20px; color: #6a7b74; line-height: 1.5; font-size: .9rem; }
-      label { display: block; margin: 14px 0 6px; color: #245d45; font-size: .78rem; font-weight: 750; }
-      input { width: 100%; padding: 12px 13px; border: 1px solid #dce8e0; border-radius: 11px; font: inherit; outline: none; }
-      input:focus { border-color: #73aa88; box-shadow: 0 0 0 4px rgba(115, 170, 136, .14); }
-      button { width: 100%; margin-top: 20px; padding: 12px 14px; border: 0; border-radius: 11px; color: #fff; background: #236b4d; font: inherit; font-weight: 800; cursor: pointer; }
-      button:hover { background: #174735; }
-      .status { min-height: 20px; margin: 12px 0 0; color: #a43d3d; font-size: .78rem; line-height: 1.4; }
-      .status.ok { color: #236b4d; }
-      .security { margin-top: 18px; color: #7b8a84; font-size: .72rem; line-height: 1.45; }
-    </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Teacher Mail Desk</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div id="alertContainer" aria-live="polite"></div>
+
     <main>
-      <h1>Teacher account</h1>
-      <p>Create an account to use the managed college-application mailbox.</p>
-      <form id="account-form">
-        <label for="name">Name</label>
-        <input id="name" name="name" autocomplete="name" required />
-        <label for="email">Google account email</label>
-        <input id="email" name="email" type="email" autocomplete="email" required />
-        <label for="password">Portal password</label>
-        <input id="password" name="password" type="password" minlength="12" autocomplete="new-password" required />
-        <label for="access-code">Access code</label>
-        <input id="access-code" name="access-code" type="password" minlength="12" autocomplete="one-time-code" required />
-        <button type="submit">Create teacher account</button>
-        <div id="status" class="status" role="status" aria-live="polite"></div>
-      </form>
-      <div class="security">Account creation is completed by the private Apps Script backend. Passwords must never be shared in this page, GitHub, or a Sheet as plain text.</div>
+      <section id="loginContainer" class="container">
+        <h2>Login</h2>
+        <p class="muted">Sign in to the teacher mailbox workspace.</p>
+        <form id="loginForm" method="post" target="_top">
+          <input type="hidden" name="action" value="signin" />
+          <div class="form-group">
+            <label for="loginEmail">Google account email:</label>
+            <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">Portal password:</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="12" required />
+          </div>
+          <div class="form-group">
+            <label for="loginAccessCode">Access code:</label>
+            <input id="loginAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="12" required />
+          </div>
+          <div class="button-group">
+            <button type="submit">Login</button>
+            <button type="button" id="showRegisterBtn" class="secondary">Register</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="registerContainer" class="container hidden">
+        <h2>Register</h2>
+        <p class="muted">Create the teacher account with the administrator access code.</p>
+        <form id="registerForm" method="post" target="_top">
+          <input type="hidden" name="action" value="signup" />
+          <div class="form-group">
+            <label for="registerName">Teacher name:</label>
+            <input id="registerName" name="displayName" type="text" autocomplete="name" required />
+          </div>
+          <div class="form-group">
+            <label for="registerEmail">Google account email:</label>
+            <input id="registerEmail" name="email" type="email" autocomplete="email" required />
+          </div>
+          <div class="form-group">
+            <label for="registerPassword">Create portal password:</label>
+            <input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="12" required />
+          </div>
+          <div class="form-group">
+            <label for="registerAccessCode">Access code:</label>
+            <input id="registerAccessCode" name="accessCode" type="password" autocomplete="one-time-code" minlength="12" required />
+          </div>
+          <div class="button-group">
+            <button type="submit">Register</button>
+            <button type="button" id="showLoginBtn" class="secondary">Back to Login</button>
+          </div>
+        </form>
+      </section>
+
+      <p class="security-note">The secure Apps Script portal verifies the Google account, password, and access code. GitHub Pages never stores credentials in a Sheet or repository.</p>
     </main>
+
     <script>
       const APP_SCRIPT_URL = "https://script.google.com/macros/s/REPLACE_WITH_PORTAL_DEPLOYMENT_ID/exec";
-      const form = document.getElementById("account-form");
-      const status = document.getElementById("status");
-      form.addEventListener("submit", (event) => {
+      const alertContainer = document.getElementById("alertContainer");
+
+      function showAlert(message, type = "error") {
+        alertContainer.textContent = "";
+        const alert = document.createElement("div");
+        alert.className = `alert alert-${type}`;
+        alert.textContent = message;
+        alertContainer.appendChild(alert);
+      }
+
+      function showLogin() {
+        document.getElementById("loginContainer").classList.remove("hidden");
+        document.getElementById("registerContainer").classList.add("hidden");
+      }
+
+      function showRegister() {
+        document.getElementById("loginContainer").classList.add("hidden");
+        document.getElementById("registerContainer").classList.remove("hidden");
+      }
+
+      function submitToSecurePortal(event) {
         event.preventDefault();
         if (APP_SCRIPT_URL.includes("REPLACE_WITH_")) {
-          status.textContent = "The secure account backend is not connected yet.";
+          showAlert("The secure Apps Script portal is not connected yet. Complete its deployment before signing in.");
           return;
         }
-        status.textContent = "Open the secure Apps Script account page to finish registration.";
-        status.className = "status ok";
-        window.location.href = APP_SCRIPT_URL;
+        const form = event.currentTarget;
+        form.action = APP_SCRIPT_URL;
+        form.submit();
+      }
+
+      document.getElementById("showRegisterBtn").addEventListener("click", showRegister);
+      document.getElementById("showLoginBtn").addEventListener("click", showLogin);
+      document.getElementById("loginForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        submitToSecurePortal(event);
+      });
+      document.getElementById("registerForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        submitToSecurePortal(event);
       });
     </script>
   </body>

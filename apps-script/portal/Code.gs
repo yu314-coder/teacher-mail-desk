@@ -21,6 +21,60 @@ function doGet() {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/**
+ * Accepts the GitHub Pages login/register form without exposing credentials
+ * to GitHub or a browser cross-origin API. The form is HTTPS POSTed directly
+ * to this web app, then the teacher is redirected into the Apps Script UI.
+ */
+function doPost(e) {
+  try {
+    const parameters = e && e.parameter ? e.parameter : {};
+    const expectedEmail = String(parameters.email || '').trim().toLowerCase();
+    const actualEmail = activeEmail_();
+    if (expectedEmail && expectedEmail !== actualEmail) {
+      throw new Error('The email must match the signed-in Google account.');
+    }
+
+    const action = String(parameters.action || '').trim().toLowerCase();
+    if (action === 'signin') {
+      signIn(parameters.password, parameters.accessCode);
+      return postRedirect_('signin');
+    }
+    if (action === 'signup') {
+      signUp(parameters.displayName, parameters.password, parameters.accessCode);
+      return postRedirect_('signup');
+    }
+    throw new Error('Unknown account action.');
+  } catch (error) {
+    return postResult_('Teacher account', publicError_(error), false);
+  }
+}
+
+function postRedirect_(mode) {
+  const destination = ScriptApp.getService().getUrl() + '?mode=' + encodeURIComponent(mode);
+  return postResult_('Account verified', 'Opening the secure teacher mailbox…', true, destination);
+}
+
+function postResult_(title, message, success, destination) {
+  const safeTitle = escapeHtml_(title);
+  const safeMessage = escapeHtml_(message);
+  const safeDestination = destination ? escapeHtml_(destination) : '';
+  const redirectScript = destination ? '<script>window.top.location.replace(' + JSON.stringify(destination) + ');</script>' : '';
+  return HtmlService.createHtmlOutput(
+    '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>body{font:16px system-ui,sans-serif;max-width:560px;margin:12vh auto;padding:24px;color:#24342b}' +
+    '.card{padding:28px;border:1px solid #dce8e0;border-radius:16px;box-shadow:0 10px 30px #183f2618}' +
+    '.ok{color:#236b4d}.bad{color:#a43d3d}a{color:#236b4d}</style></head><body><main class="card">' +
+    '<h1 class="' + (success ? 'ok' : 'bad') + '">' + safeTitle + '</h1><p>' + safeMessage + '</p>' +
+    (destination ? '<p><a href="' + safeDestination + '">Continue</a></p>' : '<p><a href="' + escapeHtml_(ScriptApp.getService().getUrl()) + '">Return to account sign-in</a></p>') +
+    '</main>' + redirectScript + '</body></html>'
+  ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function escapeHtml_(value) {
+  return String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+
 function getAppState() {
   const email = activeEmail_();
   if (!email) return { ok: false, code: 'GOOGLE_AUTH_REQUIRED', message: 'Sign in to the teacher Google account before opening the portal.' };
@@ -50,10 +104,11 @@ function signUp(displayName, password, accessCode) {
   return { ok: true, email, expiresAt: result.expiresAt };
 }
 
-function signIn(password) {
+function signIn(password, accessCode) {
   const email = activeEmail_();
   if (!password || String(password).length < 12) throw new Error('Use the password created for this teacher portal account.');
-  const result = loggerCall_('login', { email, password: String(password) });
+  if (!accessCode || String(accessCode).length < 12) throw new Error('Enter the administrator access code.');
+  const result = loggerCall_('login', { email, password: String(password), accessCode: String(accessCode) });
   saveSession_(result.sessionToken);
   return { ok: true, email, expiresAt: result.expiresAt };
 }

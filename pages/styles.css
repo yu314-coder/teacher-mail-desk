@@ -1,62 +1,53 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
 :root {
   color-scheme: light;
-  --ink: #13251f;
-  --muted: #61736d;
-  --paper: #f5f8f4;
-  --card: rgba(255, 255, 255, 0.9);
-  --line: #dce7df;
-  --green: #236b4d;
-  --green-dark: #174735;
-  --mint: #dff0e4;
-  --yellow: #fff4cf;
-  --shadow: 0 20px 60px rgba(30, 67, 51, 0.13);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #333;
 }
-
-* { box-sizing: border-box; }
 
 body {
-  margin: 0;
-  min-width: 320px;
-  color: var(--ink);
-  background:
-    radial-gradient(circle at 9% 1%, rgba(183, 221, 190, 0.35), transparent 31rem),
-    radial-gradient(circle at 91% 0%, rgba(241, 218, 154, 0.28), transparent 28rem),
-    var(--paper);
+  max-width: 1200px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
-button, a { font: inherit; }
+main { width: min(560px, 100%); margin: 7vh auto 0; }
+#alertContainer { min-height: 0; }
 
-.page-shell { width: min(1120px, calc(100% - 36px)); margin: 0 auto; padding: 54px 0 40px; }
-.hero-card, .portal-card { background: var(--card); border: 1px solid rgba(220, 231, 223, 0.9); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
-.hero-card { padding: clamp(30px, 6vw, 74px); border-radius: 30px 30px 10px 10px; }
-.eyebrow, .section-kicker { color: var(--green); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.15em; }
-.eyebrow { display: flex; gap: 9px; align-items: center; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #3eaf73; box-shadow: 0 0 0 5px rgba(62, 175, 115, 0.12); }
-h1, h2, p { margin-top: 0; }
-h1 { max-width: 760px; margin-bottom: 22px; font-size: clamp(2.35rem, 7vw, 5.3rem); line-height: 0.98; letter-spacing: -0.065em; font-weight: 800; }
-.lede { max-width: 690px; color: var(--muted); font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.65; }
-.trust-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 31px; }
-.trust-row span { padding: 8px 12px; color: var(--green-dark); background: var(--mint); border-radius: 999px; font-size: 0.82rem; font-weight: 700; }
-.portal-card { margin-top: 16px; padding: 22px; border-radius: 10px 10px 30px 30px; }
-.portal-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 6px 8px 18px; }
-.section-kicker { margin-bottom: 8px; }
-h2 { margin-bottom: 0; font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: -0.04em; }
-.button { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border-radius: 12px; text-decoration: none; font-weight: 750; cursor: pointer; }
-.button-secondary { color: var(--green-dark); border: 1px solid var(--line); background: #fff; }
-.notice { display: flex; flex-direction: column; gap: 5px; margin: 0 8px 16px; padding: 15px 16px; border-radius: 14px; line-height: 1.45; }
-.notice-warning { color: #6b5310; background: var(--yellow); }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
-#portal-frame { display: block; width: 100%; height: min(780px, 76vh); min-height: 650px; border: 0; border-radius: 18px; background: #f8fbf8; }
-.footer-note { max-width: 810px; margin: 24px auto 0; color: var(--muted); line-height: 1.65; text-align: center; }
-.footer-note p { margin-bottom: 10px; }
-.small-print { font-size: 0.85rem; }
+.container {
+  padding: 40px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
 
-@media (max-width: 680px) {
-  .page-shell { width: min(100% - 22px, 1120px); padding-top: 16px; }
-  .hero-card { padding: 30px 24px; }
-  .portal-card { padding: 12px; }
-  .portal-heading { align-items: flex-start; flex-direction: column; padding: 10px 6px 16px; }
-  .button-secondary { width: 100%; }
-  #portal-frame { min-height: 720px; height: 820px; }
+h2 { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #e9ecef; color: #2c3e50; font-size: 2em; font-weight: 600; }
+.muted { margin-bottom: 22px; color: #6c757d; line-height: 1.5; }
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; margin-bottom: 8px; color: #495057; font-size: 0.95em; font-weight: 600; }
+.form-group input { width: 100%; padding: 14px 16px; border: 2px solid #e9ecef; border-radius: 8px; outline: none; color: #333; background: rgba(255, 255, 255, 0.9); font: inherit; transition: all 0.3s ease; }
+.form-group input:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); background: #fff; }
+.button-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+button { flex: 1 1 180px; min-height: 46px; padding: 12px 24px; border: 0; border-radius: 8px; color: #fff; background: linear-gradient(135deg, #667eea, #764ba2); box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; }
+button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+button:active { transform: translateY(0); }
+button.secondary { color: #fff; background: linear-gradient(135deg, #6c757d, #495057); box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3); }
+.security-note { margin: 0 auto; max-width: 500px; color: rgba(255, 255, 255, 0.88); font-size: 0.82rem; line-height: 1.55; text-align: center; }
+.alert { padding: 16px 20px; margin: 0 auto 15px; border-left: 4px solid; border-radius: 8px; background: #f8d7da; color: #721c24; font-weight: 500; line-height: 1.45; }
+.alert-success { border-left-color: #28a745; background: #d4edda; color: #155724; }
+.hidden { display: none !important; }
+
+@media (max-width: 600px) {
+  body { padding: 10px; }
+  main { margin-top: 3vh; }
+  .container { padding: 24px 20px; }
+  h2 { font-size: 1.6em; }
+  .button-group { flex-direction: column; }
+  button { width: 100%; }
 }
