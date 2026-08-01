@@ -11,19 +11,25 @@
 }
 
 body {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 1440px;
   min-height: 100vh;
   margin: 0 auto;
-  padding: 20px;
+  padding: clamp(12px, 2vw, 24px);
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  overflow-x: hidden;
 }
 
-main { width: min(1120px, 100%); margin: 7vh auto 0; }
+main {
+  width: min(1180px, 100%);
+  margin: clamp(18px, 6vh, 72px) auto 28px;
+}
 
 #alertContainer { min-height: 0; }
 
 .container {
-  padding: 40px;
+  width: 100%;
+  padding: clamp(22px, 3.2vw, 40px);
   margin-bottom: 20px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
@@ -69,6 +75,52 @@ h2 {
   transition: all 0.3s ease;
 }
 
+input,
+textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  outline: none;
+  color: #333;
+  background: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  line-height: 1.45;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+input:not([type="file"]),
+textarea {
+  padding: 13px 14px;
+}
+
+textarea {
+  min-height: 122px;
+  resize: vertical;
+}
+
+label {
+  display: block;
+  margin: 0 0 8px;
+  color: #495057;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+input:focus,
+textarea:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+  background: #fff;
+}
+
+input[type="file"] {
+  min-height: 44px;
+  padding: 8px;
+  cursor: pointer;
+}
+
 .form-group input:focus {
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -83,7 +135,7 @@ h2 {
 }
 
 button {
-  flex: 1 1 180px;
+  flex: 0 1 auto;
   min-height: 46px;
   padding: 12px 24px;
   border: 0;
@@ -130,13 +182,18 @@ button.secondary {
 .alert-success { border-left-color: #28a745; background: #d4edda; color: #155724; }
 .hidden { display: none !important; }
 
-.dashboard-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; }
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.78fr) minmax(0, 1.8fr);
+  gap: clamp(14px, 2vw, 22px);
+  align-items: start;
+}
 .side-panel, .main-panel { width: auto; min-width: 0; }
 .side-panel { min-height: 650px; }
 .side-heading, .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .side-heading h2, .panel-heading h2 { margin-bottom: 0; border-bottom: 0; padding-bottom: 0; font-size: 1.5rem; }
 .eyebrow { margin-bottom: 7px; color: #667eea; font-size: .7rem; font-weight: 850; letter-spacing: .15em; }
-.quiet { flex: 0 0 auto; min-height: 36px; padding: 8px 12px; color: #495057; background: #eef1f8; box-shadow: none; }
+.quiet { flex: 0 0 auto; width: auto; min-width: 92px; min-height: 36px; padding: 8px 12px; color: #495057; background: #eef1f8; box-shadow: none; }
 .quiet:hover { color: #fff; background: linear-gradient(135deg, #667eea, #764ba2); }
 .account-chip { margin: 18px 0; padding: 13px; border: 1px solid #e9ecef; border-radius: 12px; background: #f7f8fc; }
 .account-chip strong, .account-chip span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -153,11 +210,11 @@ button.secondary {
 .thread-button span { margin-top: 4px; color: #6c757d; font-size: .74rem; }
 .empty { padding: 28px 12px; color: #6c757d; font-size: .82rem; line-height: 1.55; text-align: center; }
 .full-button { width: 100%; margin-top: 12px; }
-.main-panel { padding: 40px; }
-.compose-card { margin-top: 20px; padding: 17px; border: 1px solid #e9ecef; border-radius: 12px; background: #f8f9fd; }
+.main-panel { padding: clamp(22px, 3.2vw, 40px); }
+.compose-card { display: grid; gap: 14px; margin-top: 20px; padding: clamp(15px, 2vw, 20px); border: 1px solid #e9ecef; border-radius: 12px; background: #f8f9fd; }
 .compose-card textarea, .reply-box textarea { min-height: 118px; background: #fff; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.small-text { font-size: .78rem; text-align: right; }
+.small-text { max-width: 48%; font-size: .78rem; text-align: right; }
 .thread-panel { margin-top: 22px; padding-top: 22px; border-top: 1px solid #e9ecef; }
 .thread-panel > h2 { margin-bottom: 4px; }
 .message-list { display: grid; gap: 10px; margin-top: 17px; }
@@ -168,26 +225,37 @@ button.secondary {
 .blocked-message { color: #766018; background: #fff7dc; border-color: #f0dfaa; font-size: .8rem; line-height: 1.5; }
 .message-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .button-small { flex: 0 0 auto; min-height: 34px; padding: 7px 12px; font-size: .78rem; }
-.reply-box { margin-top: 17px; padding-top: 17px; border-top: 1px solid #e9ecef; }
+.reply-box { display: grid; gap: 14px; margin-top: 17px; padding-top: 17px; border-top: 1px solid #e9ecef; }
 .reply-box h3 { margin-bottom: 4px; color: #2c3e50; }
 #portalBridge { position: fixed; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; left: -10px; bottom: -10px; }
 
 @media (max-width: 600px) {
   body { padding: 10px; }
-  main { margin-top: 3vh; }
-  .container { padding: 24px 20px; }
-  h2 { font-size: 1.6em; }
+  main { width: 100%; margin: 12px auto 22px; }
+  .container { padding: 20px 16px; border-radius: 14px; }
+  h2 { font-size: 1.55rem; line-height: 1.18; }
   .button-group { flex-direction: column; }
-  button { width: 100%; }
+  .button-group > button,
+  button.full-button { width: 100%; }
+  input:not([type="file"]),
+  textarea { font-size: 16px; }
+  .side-heading, .panel-heading { align-items: flex-start; }
+  .side-heading h2, .panel-heading h2 { font-size: 1.35rem; }
+  .small-text { max-width: 46%; line-height: 1.35; }
 }
 
 @media (max-width: 800px) {
-  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
   .side-panel { min-height: 0; }
-  .main-panel { padding: 24px 20px; }
+  .main-panel { padding: 20px 16px; }
 }
 
 @media (max-width: 620px) {
   .two-col { grid-template-columns: 1fr; }
-  .main-panel { padding: 24px 20px; }
+  .main-panel { padding: 20px 16px; }
+}
+
+@media (min-width: 801px) and (max-width: 1040px) {
+  .dashboard-grid { grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.5fr); }
+  .container { padding: 26px; }
 }
