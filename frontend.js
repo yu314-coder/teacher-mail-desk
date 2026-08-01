@@ -97,8 +97,8 @@ function showDashboard() {
   $('loginForm').classList.add('hidden');
   $('registerForm').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
-  $('statusLabel').textContent = 'Connecting to managed Gmail…';
-  authenticatedRpc('setupMailbox', []).then(loadThreads).catch((error) => showAlert(messageText(error)));
+  $('statusLabel').textContent = 'Loading managed conversations…';
+  loadThreads();
 }
 
 function hideDashboard() {
@@ -114,10 +114,11 @@ function setBusy(button, busy, label) {
   if (!button) return;
   button.disabled = busy;
   if (busy) {
-    button.dataset.originalLabel = button.textContent;
+    if (!button.dataset.originalLabel) button.dataset.originalLabel = button.textContent;
     button.textContent = label || 'Working…';
-  } else if (button.dataset.originalLabel) {
-    button.textContent = button.dataset.originalLabel;
+  } else {
+    if (button.dataset.originalLabel) button.textContent = button.dataset.originalLabel;
+    delete button.dataset.originalLabel;
   }
 }
 
@@ -231,7 +232,7 @@ function authenticatedRpc(method, args) {
 }
 
 function submitAccount(form, method, accountId, passwordId, codeId, buttonLabel) {
-  const button = form.querySelector('button[type="submit"]');
+  const button = form.querySelector('button[type="submit"]') || form.querySelector('button:not(.secondary)');
   setBusy(button, true, buttonLabel);
   showAlert('');
   bridgeRpc(method, [$(accountId).value, $(passwordId).value, $(codeId).value]).then((result) => {
@@ -289,26 +290,32 @@ $('registerForm').addEventListener('submit', (event) => {
 $('composeForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  setBusy(button, true, 'Sending…');
   try {
     const attachments = await readAttachments($('composeFiles'));
     handleSend(form, 'sendMessage', [$('composeTo').value, $('composeSubject').value, $('composeBody').value, attachments], 'Message sent. It is now a managed conversation.', 'Sending…');
-  } catch (error) { showAlert(messageText(error)); }
+  } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('replyForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  setBusy(button, true, 'Sending reply…');
   try {
     const attachments = await readAttachments($('replyFiles'));
     handleSend(form, 'replyToThread', [selectedThreadId, $('replyBody').value, attachments], 'Reply sent through the managed Gmail backend.', 'Sending reply…');
-  } catch (error) { showAlert(messageText(error)); }
+  } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('forwardForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  setBusy(button, true, 'Forwarding…');
   try {
     const attachments = await readAttachments($('forwardFiles'));
     handleSend(form, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through the managed Gmail backend.', 'Forwarding…');
-  } catch (error) { showAlert(messageText(error)); }
+  } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('refreshButton').addEventListener('click', loadThreads);
 $('signoutButton').addEventListener('click', () => {
@@ -319,4 +326,4 @@ $('signoutButton').addEventListener('click', () => {
   }).catch((error) => showAlert(messageText(error)));
 });
 
-bridgeRpc('getAppState', []).then(showState).catch((error) => showAlert(messageText(error)));
+showLogin();
