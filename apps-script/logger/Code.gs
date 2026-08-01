@@ -97,6 +97,7 @@ function handleOperation_(operation, payload) {
     case 'authorize': return authorize_(payload);
     case 'mailboxSnapshot': return mailboxSnapshot_(payload);
     case 'recordThread': return recordThread_(payload);
+    case 'recordThreads': return recordThreads_(payload);
     case 'listThreads': return listThreads_(payload);
     case 'listAllowedSenders': return listAllowedSenders_(payload);
     case 'ensureAllowedSenders': return ensureAllowedSenders_(payload);
@@ -267,6 +268,29 @@ function recordThread_(payload) {
     sheet.appendRow([email, threadId, recipient, new Date(), new Date(), 'active']);
   }
   return { recorded: true };
+}
+
+function recordThreads_(payload) {
+  const email = normalizedEmail_(payload.email);
+  const items = Array.isArray(payload.threads) ? payload.threads.slice(0, 50) : [];
+  if (!items.length) return { recorded: true, count: 0 };
+
+  const sheet = sheetFor_('threads');
+  const existing = {};
+  readRows_(sheet).forEach((row) => {
+    if (row.email === email && row.threadId) existing[String(row.threadId)] = true;
+  });
+  const rows = [];
+  items.forEach((item) => {
+    const threadId = cleanText_(item && item.threadId, 160);
+    if (!threadId || existing[threadId]) return;
+    existing[threadId] = true;
+    rows.push([email, threadId, cleanText_(item && item.recipient, 500), new Date(), new Date(), 'active']);
+  });
+  if (rows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.threads.headers.length).setValues(rows);
+  }
+  return { recorded: true, count: rows.length };
 }
 
 function listThreads_(payload) {

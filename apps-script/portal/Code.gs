@@ -219,6 +219,14 @@ function getManagedThread(sessionToken, threadId) {
   // private Sheet logger. Use that copy immediately instead of waiting on a
   // second Gmail payload request just to open a sent conversation.
   if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits) };
+  // A discovered Inbox thread has no portal audit row by design. Fetch its
+  // complete Gmail payload once now so opening it shows the actual sender,
+  // headers, body, and safe attachment metadata immediately. The previous
+  // path returned a placeholder and then made a second slow GmailApp call.
+  if (record && record.inbound) {
+    const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
+    return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(snapshot.messages || [])) };
+  }
   if (record) {
     const summary = threadSummary_(record, email, []);
     summary.needsRemoteCheck = true;
@@ -329,7 +337,7 @@ function gmailAppMessageView_(message, accountEmail, audit) {
     mimeType: safeDisplayText_(file.getContentType(), 120),
     size: Number(file.getSize() || 0),
   })).slice(0, 20);
-  const blocked = hasFinancialPattern_(subject + '\n' + body);
+  const blocked = hasFinancialPattern_(subject + '\n' + body + '\n' + attachments.map((file) => file.name + ' ' + file.mimeType).join('\n'));
   return {
     id: String(message.getId() || ''),
     blocked,
@@ -607,7 +615,7 @@ function threadView_(thread, email, record, allowedSenders, auditByMessageId) {
   const inbound = messages.filter((message) => !message.mine);
   const sent = messages.filter((message) => message.mine);
   const lastMessage = messages.length ? messages[messages.length - 1] : null;
-  const recipient = String(record.recipient || '').trim() || recipientFromThread_(thread, email);
+  const recipient = String(record.recipient || '').trim() || (inbound.length ? inbound[inbound.length - 1].from : recipientFromThread_(thread, email));
   return {
     threadId: record.threadId,
     recipient,
@@ -629,7 +637,9 @@ function messageView_(message, accountEmail, audit) {
   const date = header_(message, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : String(audit && audit.timestamp || ''));
   const hasAttachment = hasAttachment_(message.payload);
   const body = plainBody_(message.payload) || String(audit && audit.body || '');
-  if (hasFinancialPattern_(subject + '\n' + body)) {
+  const attachments = attachmentSummaries_(message.payload, audit);
+  const attachmentNames = attachments.map((file) => file.name + ' ' + file.mimeType).join('\n');
+  if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentNames)) {
     return {
       id: message.id,
       blocked: true,
@@ -659,7 +669,7 @@ function messageView_(message, accountEmail, audit) {
     mine: addressFrom_(from).toLowerCase() === accountEmail.toLowerCase(),
     subject: safeDisplayText_(subject, 180),
     body: safeDisplayText_(body, PORTAL.maxBodyChars),
-    attachments: attachmentSummaries_(message.payload, audit),
+    attachments,
   };
 }
 
@@ -702,6 +712,7 @@ function allowedSendersFor_(email) {
 function managedThreadRecords_(email, allowedSenders, preloadedRecords, discoverInbound) {
   const records = (preloadedRecords || loggerCall_('listThreads', { email })).slice(-100).reverse();
   const byId = {};
+  const discovered = [];
   records.forEach((record) => {
     if (record && record.threadId) byId[record.threadId] = record;
   });
@@ -737,9 +748,12 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords, discover
         }
         const record = { threadId, recipient: '', createdAt: '', lastSeenAt: '', inbound: true };
         byId[threadId] = record;
-        try { loggerCall_('recordThread', { email, threadId, recipient: '' }); } catch (ignored) {}
+        discovered.push({ threadId, recipient: '' });
       });
     } catch (ignored) {}
+  }
+  if (discovered.length) {
+    try { loggerCall_('recordThreads', { email, threads: discovered }); } catch (ignored) {}
   }
   return Object.keys(byId).map((threadId) => byId[threadId]);
 }
