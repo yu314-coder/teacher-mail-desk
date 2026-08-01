@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="A private teacher mail desk for managed email conversations." />
+    <title>Teacher Mail Desk</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero-card">
+        <div class="eyebrow"><span class="status-dot"></span> PRIVATE TEACHER PORTAL</div>
+        <h1>One calm place for the conversations that matter.</h1>
+        <p class="lede">
+          Send, receive, and reply to managed Gmail conversations without exposing the rest of a mailbox.
+          The portal only displays threads that were started through this site.
+        </p>
+        <div class="trust-row" aria-label="Privacy commitments">
+          <span>Google sign-in</span>
+          <span>Managed threads only</span>
+          <span>No attachments</span>
+          <span>Financial-content filter</span>
+        </div>
+      </section>
+
+      <section class="portal-card" aria-labelledby="portal-title">
+        <div class="portal-heading">
+          <div>
+            <p class="section-kicker">SECURE WORKSPACE</p>
+            <h2 id="portal-title">Teacher Mail Desk</h2>
+          </div>
+          <a id="open-portal" class="button button-secondary" href="#" target="_blank" rel="noopener">Open in a new tab</a>
+        </div>
+
+        <div id="setup-warning" class="notice notice-warning" hidden>
+          <strong>Portal URL not configured.</strong>
+          <span>The GitHub Pages shell is ready. Add the deployed Apps Script portal URL in <code>pages/index.html</code> before publishing.</span>
+        </div>
+
+        <iframe
+          id="portal-frame"
+          title="Teacher Mail Desk secure portal"
+          loading="eager"
+          referrerpolicy="no-referrer"
+          hidden
+        ></iframe>
+      </section>
+
+      <section class="footer-note">
+        <p><strong>How the boundary works:</strong> Gmail is accessed by the teacher's own Google account. The backend records an allowlist of portal-created thread IDs, and it refuses to display unrelated mailbox messages.</p>
+        <p class="small-print">Passwords are never saved in this repository or as plain text in the Sheet. The Sheet is limited to salted hashes, thread allowlists, and audit metadata.</p>
+      </section>
+    </main>
+    <script>
+      // This URL is public configuration, not a secret. Never put a password, token, or Sheet ID here.
+      const APP_SCRIPT_URL = "https://script.google.com/macros/s/REPLACE_WITH_PORTAL_DEPLOYMENT_ID/exec";
+      const isConfigured = APP_SCRIPT_URL && !APP_SCRIPT_URL.includes("REPLACE_WITH_");
+      const frame = document.getElementById("portal-frame");
+      const openPortal = document.getElementById("open-portal");
+      const warning = document.getElementById("setup-warning");
+
+      if (isConfigured) {
+        frame.src = APP_SCRIPT_URL;
+        frame.hidden = false;
+        openPortal.href = APP_SCRIPT_URL;
+      } else {
+        warning.hidden = false;
+        openPortal.setAttribute("aria-disabled", "true");
+        openPortal.addEventListener("click", (event) => event.preventDefault());
+      }
+    </script>
+  </body>
+</html>
