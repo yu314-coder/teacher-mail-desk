@@ -291,8 +291,10 @@ function messageAudit_(payload) {
 function createSession_(email) {
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   const now = new Date();
-  const expires = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  sheetFor_('sessions').appendRow([hash_(token, 'session'), email, now, expires, now, 'active']);
+  const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const nowIso = now.toISOString();
+  const expiresIso = expires.toISOString();
+  sheetFor_('sessions').appendRow([hash_(token, 'session'), email, nowIso, expiresIso, nowIso, 'active']);
   return { authenticated: true, sessionToken: token, expiresAt: expires.toISOString() };
 }
 

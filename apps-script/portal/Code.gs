@@ -32,9 +32,21 @@ function doGet(e) {
  * to this web app, then the teacher is redirected into the Apps Script UI.
  */
 function doPost(e) {
+  const parameters = e && e.parameter ? e.parameter : {};
+  if (parameters.bridge === '1') {
+    try {
+      return bridgePost_(parameters);
+    } catch (error) {
+      return bridgeResponse_(
+        cleanText_(parameters.requestId, 120),
+        cleanText_(parameters.nonce, 180),
+        false,
+        null,
+        publicError_(error)
+      );
+    }
+  }
   try {
-    const parameters = e && e.parameter ? e.parameter : {};
-    if (parameters.bridge === '1') return bridgePost_(parameters);
     backendEmail_();
 
     const action = String(parameters.action || '').trim().toLowerCase();
