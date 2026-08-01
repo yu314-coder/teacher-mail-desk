@@ -222,6 +222,12 @@ function loadThreads() {
     if (selectedThreadId) selectThread(selectedThreadId);
   }).catch((error) => {
     $('statusLabel').textContent = '';
+    const list = $('threadList');
+    list.textContent = '';
+    const failed = document.createElement('div');
+    failed.className = 'empty';
+    failed.textContent = 'Conversations could not be loaded. Tap Refresh to try again.';
+    list.appendChild(failed);
     showAlert(messageText(error));
   });
 }

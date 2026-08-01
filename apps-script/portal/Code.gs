@@ -161,16 +161,12 @@ function listManagedThreads(sessionToken) {
   const email = requireSession_(sessionToken);
   const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
   const allowed = loggerCall_('listThreads', { email }).slice(0, PORTAL.maxThreads);
-  ensureManagedLabel_();
   const result = [];
   allowed.forEach((record) => {
     try {
       const thread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
       const view = threadView_(thread, email, record, allowedSenders);
       result.push(view);
-      (view.messages || []).filter((message) => !message.blocked && message.body).forEach((message) => {
-        recordMessageAudit_(email, 'received', 'view', record.threadId, message.id, message.from, email, message.subject, message.body, []);
-      });
     } catch (error) {
       // A deleted or inaccessible thread remains in the audit log but is not
       // allowed to break the rest of the inbox.
