@@ -69,6 +69,8 @@ window.addEventListener('message', (event) => {
 });
 
 let currentThreads = [];
+let currentAllowedSenders = [];
+let activeFolder = 'all';
 let selectedThreadId = '';
 let selectedMessageId = '';
 let portalSessionToken = '';
@@ -94,6 +96,7 @@ function showRegister() {
 }
 
 function showDashboard() {
+  document.body.classList.add('mailbox-open');
   $('loginForm').classList.add('hidden');
   $('registerForm').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
@@ -102,10 +105,13 @@ function showDashboard() {
 }
 
 function hideDashboard() {
+  document.body.classList.remove('mailbox-open');
   $('dashboardContainer').classList.add('hidden');
   $('loginForm').classList.remove('hidden');
   $('registerForm').classList.add('hidden');
   currentThreads = [];
+  currentAllowedSenders = [];
+  activeFolder = 'all';
   selectedThreadId = '';
   selectedMessageId = '';
 }
@@ -139,26 +145,87 @@ function readAttachments(input) {
   })));
 }
 
-function renderThreads() {
-  const list = $('threadList');
+function updateFolderCounts() {
+  $('allCount').textContent = currentThreads.length;
+  $('inboxCount').textContent = currentThreads.filter((thread) => thread.hasInbound).length;
+  $('sentCount').textContent = currentThreads.filter((thread) => thread.hasSent).length;
+}
+
+function setFolder(folder) {
+  activeFolder = folder;
+  document.querySelectorAll('[data-folder]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.folder === folder);
+  });
+  $('folderTitle').textContent = folder === 'inbox' ? 'Inbox' : folder === 'sent' ? 'Sent' : 'All mail';
+  renderThreads();
+}
+
+function threadMatchesFolder(thread) {
+  if (activeFolder === 'inbox') return Boolean(thread.hasInbound);
+  if (activeFolder === 'sent') return Boolean(thread.hasSent);
+  return true;
+}
+
+function renderAllowedSenders() {
+  const list = $('allowedSendersList');
   list.textContent = '';
-  if (!currentThreads.length) {
+  if (!currentAllowedSenders.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = 'No portal-created conversations yet. Use the message form to start one.';
+    empty.textContent = 'No sender addresses approved yet.';
     list.appendChild(empty);
     return;
   }
-  currentThreads.forEach((thread) => {
+  currentAllowedSenders.forEach((email) => {
+    const row = document.createElement('div');
+    row.className = 'allowed-row';
+    const dot = document.createElement('span');
+    dot.className = 'allowed-dot';
+    const address = document.createElement('span');
+    address.textContent = email;
+    row.append(dot, address);
+    list.appendChild(row);
+  });
+}
+
+function renderThreads() {
+  const list = $('threadList');
+  list.textContent = '';
+  const threads = currentThreads.filter(threadMatchesFolder);
+  if (!threads.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty mailbox-empty';
+    empty.textContent = activeFolder === 'inbox'
+      ? 'Your inbox is empty. Approved senders will appear here when they email the managed Gmail account.'
+      : activeFolder === 'sent'
+        ? 'No sent conversations yet. Use Compose to send the first message.'
+        : 'No mail yet. Use Compose to start a managed conversation.';
+    list.appendChild(empty);
+    $('noThread').classList.remove('hidden');
+    return;
+  }
+  $('noThread').classList.add('hidden');
+  threads.forEach((thread) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'thread-button' + (thread.threadId === selectedThreadId ? ' active' : '');
+    button.className = 'thread-row' + (thread.threadId === selectedThreadId ? ' active' : '');
     button.addEventListener('click', () => selectThread(thread.threadId));
-    const title = document.createElement('strong');
-    title.textContent = thread.subject || 'Private conversation';
+    const sender = document.createElement('strong');
+    sender.className = 'thread-sender';
+    sender.textContent = thread.sender || thread.recipient || 'Managed conversation';
+    const subject = document.createElement('span');
+    subject.className = 'thread-subject';
+    subject.textContent = thread.subject || 'Private conversation';
     const preview = document.createElement('span');
-    preview.textContent = thread.preview || thread.recipient || '';
-    button.append(title, preview);
+    preview.className = 'thread-preview';
+    preview.textContent = thread.preview || '';
+    const date = document.createElement('time');
+    date.className = 'thread-date';
+    date.textContent = thread.lastMessageAt ? new Date(thread.lastMessageAt).toLocaleDateString() : '';
+    const copy = document.createElement('span');
+    copy.className = 'thread-copy';
+    copy.append(subject, preview);
+    button.append(sender, copy, date);
     list.appendChild(button);
   });
 }
@@ -167,9 +234,9 @@ function prepareForward(threadId, messageId) {
   selectedMessageId = messageId;
   $('forwardThreadId').value = threadId;
   $('forwardMessageId').value = messageId;
-  $('forwardCard').classList.remove('hidden');
+  $('forwardForm').classList.remove('hidden');
   $('forwardTo').focus();
-  $('forwardCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  $('forwardForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function selectThread(id) {
@@ -217,7 +284,10 @@ function loadThreads() {
   $('statusLabel').textContent = 'Loading managed conversations…';
   authenticatedRpc('listManagedThreads', []).then((result) => {
     currentThreads = result && result.threads ? result.threads : [];
-    $('statusLabel').textContent = currentThreads.length + ' managed thread' + (currentThreads.length === 1 ? '' : 's');
+    currentAllowedSenders = result && result.allowedSenders ? result.allowedSenders : [];
+    $('statusLabel').textContent = currentThreads.length + ' conversation' + (currentThreads.length === 1 ? '' : 's');
+    updateFolderCounts();
+    renderAllowedSenders();
     renderThreads();
     if (selectedThreadId) selectThread(selectedThreadId);
   }).catch((error) => {
@@ -226,10 +296,28 @@ function loadThreads() {
     list.textContent = '';
     const failed = document.createElement('div');
     failed.className = 'empty';
-    failed.textContent = 'Conversations could not be loaded. Tap Refresh to try again.';
+    failed.textContent = 'Mailbox could not be loaded. Tap Refresh to try again.';
     list.appendChild(failed);
+    $('allowedSendersList').textContent = '';
     showAlert(messageText(error));
   });
+}
+
+function openCompose() {
+  $('composeForm').classList.remove('hidden');
+  $('composeTo').focus();
+}
+
+function closeCompose() {
+  $('composeForm').classList.add('hidden');
+}
+
+function closeThread() {
+  selectedThreadId = '';
+  selectedMessageId = '';
+  $('threadPanel').classList.add('hidden');
+  $('forwardForm').classList.add('hidden');
+  renderThreads();
 }
 
 function authenticatedRpc(method, args) {
@@ -260,6 +348,10 @@ function handleSend(form, method, args, successMessage, buttonLabel) {
   authenticatedRpc(method, args).then(() => {
     setBusy(button, false);
     if (form) form.reset();
+    if (method === 'sendMessage') {
+      closeCompose();
+      setFolder('sent');
+    }
     showAlert(successMessage, 'success');
     loadThreads();
   }).catch((error) => {
@@ -322,6 +414,12 @@ $('forwardForm').addEventListener('submit', async (event) => {
     const attachments = await readAttachments($('forwardFiles'));
     handleSend(form, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through the managed Gmail backend.', 'Forwarding…');
   } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
+});
+$('composeOpenButton').addEventListener('click', openCompose);
+$('composeCloseButton').addEventListener('click', closeCompose);
+$('closeThreadButton').addEventListener('click', closeThread);
+document.querySelectorAll('[data-folder]').forEach((button) => {
+  button.addEventListener('click', () => setFolder(button.dataset.folder));
 });
 $('refreshButton').addEventListener('click', loadThreads);
 $('signoutButton').addEventListener('click', () => {

@@ -160,7 +160,7 @@ function signOut(sessionToken) {
 function listManagedThreads(sessionToken) {
   const email = requireSession_(sessionToken);
   const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
-  const allowed = loggerCall_('listThreads', { email }).slice(0, PORTAL.maxThreads);
+  const allowed = managedThreadRecords_(email, allowedSenders).slice(0, PORTAL.maxThreads);
   const result = [];
   allowed.forEach((record) => {
     try {
@@ -173,7 +173,8 @@ function listManagedThreads(sessionToken) {
       recordAudit_(email, 'read_thread', record.threadId, '', 'error', 'Gmail thread unavailable');
     }
   });
-  return { ok: true, threads: result };
+  result.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
+  return { ok: true, threads: result, allowedSenders: Array.from(allowedSenders).sort() };
 }
 
 function sendMessage(sessionToken, to, subject, body, attachments) {
@@ -363,7 +364,8 @@ function forwardAuditCopy_(email, recipients, subject, body, sent, attachments) 
 }
 
 function allowedThreadMap_(email) {
-  const records = loggerCall_('listThreads', { email });
+  const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
+  const records = managedThreadRecords_(email, allowedSenders);
   return records.reduce((map, record) => { map[record.threadId] = record; return map; }, {});
 }
 
@@ -389,11 +391,18 @@ function threadView_(thread, email, record, allowedSenders) {
     .map((message) => messageView_(message, email));
   const visible = messages.filter((message) => !message.blocked && message.body);
   const lastVisible = visible.length ? visible[visible.length - 1] : null;
+  const inbound = messages.filter((message) => !message.mine);
+  const sent = messages.filter((message) => message.mine);
+  const lastMessage = messages.length ? messages[messages.length - 1] : null;
   return {
     threadId: record.threadId,
     recipient: record.recipient,
     createdAt: String(record.createdAt || ''),
     lastSeenAt: String(record.lastSeenAt || ''),
+    lastMessageAt: lastMessage ? lastMessage.date : String(record.lastSeenAt || record.createdAt || ''),
+    sender: inbound.length ? inbound[inbound.length - 1].from : '',
+    hasInbound: inbound.length > 0,
+    hasSent: sent.length > 0,
     subject: lastVisible ? lastVisible.subject : 'Private conversation',
     preview: lastVisible ? lastVisible.body.slice(0, 220) : 'This conversation is hidden by the privacy filter.',
     messages,
@@ -430,6 +439,36 @@ function latestInbound_(thread, accountEmail) {
 
 function allowedSendersFor_(email) {
   return new Set(loggerCall_('listAllowedSenders', { email }));
+}
+
+function managedThreadRecords_(email, allowedSenders) {
+  const records = loggerCall_('listThreads', { email }).slice(-100).reverse();
+  const byId = {};
+  records.forEach((record) => {
+    if (record && record.threadId) byId[record.threadId] = record;
+  });
+
+  // A Sheet-approved sender may start a brand-new Gmail thread instead of
+  // replying to a portal-created message. Discover those threads and bring
+  // them inside the same managed boundary so the teacher can reply here.
+  Array.from(allowedSenders).slice(0, 50).forEach((sender) => {
+    try {
+      const response = Gmail.Users.Threads.list('me', { q: 'from:' + sender, maxResults: 20 });
+      (response.threads || []).forEach((thread) => {
+        const threadId = String(thread.id || '').trim();
+        if (!threadId || byId[threadId]) return;
+        const record = { threadId, recipient: sender, createdAt: '', lastSeenAt: '' };
+        byId[threadId] = record;
+        try { loggerCall_('recordThread', { email, threadId, recipient: sender }); } catch (ignored) {}
+      });
+    } catch (ignored) {}
+  });
+  return Object.keys(byId).map((threadId) => byId[threadId]);
+}
+
+function dateValue_(value) {
+  const timestamp = new Date(value || '').getTime();
+  return isNaN(timestamp) ? 0 : timestamp;
 }
 
 function rawMessage_(recipients, subject, body, extraHeaders, attachments) {
