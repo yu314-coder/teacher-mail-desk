@@ -152,11 +152,28 @@ button {
 
 button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
 button:active { transform: translateY(0); }
+button:disabled,
+button:disabled:hover,
+button:disabled:active {
+  color: #f1f3f5;
+  background: #8a9299;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.9;
+  transform: none;
+}
 
 button.secondary {
   color: #fff;
   background: linear-gradient(135deg, #6c757d, #495057);
   box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
+}
+button.secondary:disabled,
+button.secondary:disabled:hover,
+button.secondary:disabled:active {
+  color: #f1f3f5;
+  background: #8a9299;
+  box-shadow: none;
 }
 
 .security-note {
