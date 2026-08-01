@@ -7,6 +7,7 @@ const bridgePending = new Map();
 const bridgeQueue = [];
 let bridgeReady = false;
 let bridgeRequestNumber = 0;
+const BRIDGE_TIMEOUT_MS = 90000;
 
 bridgeFrame.id = 'portalBridge';
 bridgeFrame.name = 'teacherMailDeskBridgeTarget';
@@ -51,7 +52,7 @@ function bridgeRpc(method, args) {
       if (!pending) return;
       bridgePending.delete(id);
       pending.reject(new Error('The private Gmail backend did not respond. Try again in a moment.'));
-    }, 30000);
+    }, BRIDGE_TIMEOUT_MS);
   });
 }
 

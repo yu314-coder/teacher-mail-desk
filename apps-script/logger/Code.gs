@@ -20,6 +20,8 @@ const LOGGER_SHEETS = {
   security: { name: 'Security', headers: ['setting', 'value'] },
 };
 
+let loggerBookCache = null;
+
 /**
  * One-time setup helper.
  *
@@ -313,7 +315,7 @@ function sheetFor_(key) {
   const props = PropertiesService.getScriptProperties();
   const id = String(props.getProperty('SHEET_ID') || '').trim();
   if (!id) throw new Error('Logger is not initialized.');
-  const book = SpreadsheetApp.openById(id);
+  const book = loggerBookCache || (loggerBookCache = SpreadsheetApp.openById(id));
   let sheet = book.getSheetByName(config.name);
   if (!sheet) sheet = book.insertSheet(config.name);
   if (key === 'users') migrateUsersSchema_(sheet);
