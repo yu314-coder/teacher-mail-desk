@@ -22,6 +22,11 @@ const LOGGER_SHEETS = {
 };
 
 let loggerBookCache = null;
+const LOGGER_CACHE = {
+  ready: 'teacher-mail-desk:logger-ready',
+  mailboxSeconds: 15,
+  sessionSeconds: 600,
+};
 
 /**
  * One-time setup helper.
@@ -200,9 +205,11 @@ function authorize_(payload) {
   const email = normalizedEmail_(payload.email);
   const token = String(payload.sessionToken || '');
   if (token.length < 24) throw new Error('The portal session has expired.');
+  const sessionHash = hash_(token, 'session');
+  const sessionCacheKey = 'teacher-mail-desk:session:' + sessionHash.slice(0, 48);
+  if (CacheService.getScriptCache().get(sessionCacheKey) === email) return { authorized: true };
   const sessionSheet = sheetFor_('sessions');
   const rows = readRows_(sessionSheet);
-  const sessionHash = hash_(token, 'session');
   const now = Date.now();
   for (const row of rows) {
     if (row.sessionHash !== sessionHash || row.email !== email || row.status !== 'active') continue;
@@ -211,6 +218,7 @@ function authorize_(payload) {
       throw new Error('The portal session has expired.');
     }
     updateRow_(sessionSheet, row.row, row.headers, { lastUsedAt: new Date() });
+    CacheService.getScriptCache().put(sessionCacheKey, email, LOGGER_CACHE.sessionSeconds);
     return { authorized: true };
   }
   throw new Error('The portal session is not valid.');
@@ -219,11 +227,19 @@ function authorize_(payload) {
 function mailboxSnapshot_(payload) {
   const email = normalizedEmail_(payload.email);
   authorize_(payload);
-  return {
+  const token = String(payload.sessionToken || '');
+  const cacheKey = 'teacher-mail-desk:mailbox:' + hash_(email + '|' + token, 'mailbox').slice(0, 48);
+  const cached = CacheService.getScriptCache().get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (ignored) {}
+  }
+  const snapshot = {
     threads: listThreads_({ email }),
     allowedSenders: listAllowedSenders_({ email }),
     messages: listMessageAudits_({ email }),
   };
+  try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(snapshot), LOGGER_CACHE.mailboxSeconds); } catch (ignored) {}
+  return snapshot;
 }
 
 function logout_(payload) {
@@ -231,6 +247,7 @@ function logout_(payload) {
   const token = String(payload.sessionToken || '');
   if (token.length < 24) return { loggedOut: true };
   const sessionHash = hash_(token, 'session');
+  CacheService.getScriptCache().remove('teacher-mail-desk:session:' + sessionHash.slice(0, 48));
   const row = readRows_(sheetFor_('sessions')).find((item) => item.sessionHash === sessionHash && item.email === email && item.status === 'active');
   if (row) updateRow_(sheetFor_('sessions'), row.row, row.headers, { status: 'revoked', lastUsedAt: new Date() });
   return { loggedOut: true };
@@ -351,7 +368,9 @@ function createSession_(email) {
   const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const nowIso = now.toISOString();
   const expiresIso = expires.toISOString();
-  sheetFor_('sessions').appendRow([hash_(token, 'session'), email, nowIso, expiresIso, nowIso, 'active']);
+  const sessionHash = hash_(token, 'session');
+  sheetFor_('sessions').appendRow([sessionHash, email, nowIso, expiresIso, nowIso, 'active']);
+  CacheService.getScriptCache().put('teacher-mail-desk:session:' + sessionHash.slice(0, 48), email, LOGGER_CACHE.sessionSeconds);
   return { authenticated: true, sessionToken: token, expiresAt: expires.toISOString() };
 }
 
@@ -364,8 +383,10 @@ function findUserByEmail_(email) {
 }
 
 function ensureSheets_() {
+  if (CacheService.getScriptCache().get(LOGGER_CACHE.ready) === '1') return;
   Object.keys(LOGGER_SHEETS).forEach((key) => sheetFor_(key));
   migrateSecurityProperties_();
+  CacheService.getScriptCache().put(LOGGER_CACHE.ready, '1', 300);
 }
 
 function sheetFor_(key) {

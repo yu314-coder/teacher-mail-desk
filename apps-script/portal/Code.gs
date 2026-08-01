@@ -187,6 +187,11 @@ function getManagedThread(sessionToken, threadId) {
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const records = (snapshot.threads || []).filter((record) => record && String(record.threadId) === id);
   let record = records.length ? records[0] : null;
+  const audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
+  // Portal-sent messages are already privacy-filtered and stored in the
+  // private Sheet logger. Use that copy immediately instead of waiting on a
+  // second Gmail payload request just to open a sent conversation.
+  if (record && audits.length) return { ok: true, thread: threadViewFromAudits_(email, record, audits) };
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
 
   // Older portal versions could label a managed thread before the Sheet row
@@ -234,6 +239,27 @@ function threadSummary_(record, email, audits) {
     loaded: false,
     messages: [],
   };
+}
+
+function threadViewFromAudits_(email, record, audits) {
+  const messages = (audits || []).slice().sort((a, b) => dateValue_(a.timestamp) - dateValue_(b.timestamp)).map((audit) => {
+    const timestamp = String(audit.timestamp || '');
+    const synthetic = {
+      id: String(audit.messageId || ''),
+      internalDate: timestamp ? String(new Date(timestamp).getTime()) : '',
+      payload: {
+        headers: [
+          { name: 'From', value: String(audit.from || email) },
+          { name: 'To', value: String(audit.to || '') },
+          { name: 'Subject', value: String(audit.subject || '') },
+          { name: 'Date', value: timestamp ? new Date(timestamp).toUTCString() : '' },
+        ],
+      },
+    };
+    return synthetic;
+  });
+  const grouped = groupAuditsByMessage_(audits);
+  return threadView_({ messages }, email, record, new Set(), grouped);
 }
 
 function sendMessage(sessionToken, to, subject, body, attachments) {

@@ -388,6 +388,7 @@ function selectThread(id) {
     if (!loaded) throw new Error('The conversation was empty.');
     const index = currentThreads.findIndex((item) => item.threadId === id);
     if (index >= 0) currentThreads[index] = loaded;
+    showAlert('');
     renderThread(loaded);
     updateFolderCounts();
   }).catch((error) => {
