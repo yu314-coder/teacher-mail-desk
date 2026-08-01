@@ -47,20 +47,20 @@
               <label for="composeBody">Message</label><textarea id="composeBody" maxlength="60000" placeholder="Write a plain-text message." required></textarea>
               <label for="composeFiles">Optional files</label><input id="composeFiles" type="file" multiple />
               <p class="helper">Up to 5 files and 20 MB total. Files are sent by Gmail but never shown in the portal or copied into the Sheet.</p>
-              <button class="full-button" type="submit">Send through managed Gmail</button>
+              <button id="composeButton" class="full-button" type="submit">Send through managed Gmail</button>
             </form>
 
             <div id="threadPanel" class="thread-panel hidden">
               <p class="eyebrow">SELECTED THREAD</p><h2 id="threadSubject">Conversation</h2><p id="threadRecipient" class="muted"></p>
               <div id="messageList" class="message-list"></div>
-              <form id="replyForm" class="reply-box"><label for="replyBody">Reply</label><textarea id="replyBody" maxlength="60000" required></textarea><label for="replyFiles">Optional files</label><input id="replyFiles" type="file" multiple /><button class="full-button" type="submit">Send reply</button></form>
-              <form id="forwardForm" class="reply-box hidden"><input id="forwardThreadId" type="hidden" /><input id="forwardMessageId" type="hidden" /><h3>Forward selected message</h3><label for="forwardTo">Forward to</label><input id="forwardTo" type="text" placeholder="person@example.com" required /><label for="forwardNote">Optional note</label><textarea id="forwardNote" maxlength="60000"></textarea><label for="forwardFiles">Optional files</label><input id="forwardFiles" type="file" multiple /><button class="full-button" type="submit">Forward message</button></form>
+              <form id="replyForm" class="reply-box"><label for="replyBody">Reply</label><textarea id="replyBody" maxlength="60000" required></textarea><label for="replyFiles">Optional files</label><input id="replyFiles" type="file" multiple /><button id="replyButton" class="full-button" type="submit">Send reply</button></form>
+              <form id="forwardForm" class="reply-box hidden"><input id="forwardThreadId" type="hidden" /><input id="forwardMessageId" type="hidden" /><h3>Forward selected message</h3><label for="forwardTo">Forward to</label><input id="forwardTo" type="text" placeholder="person@example.com" required /><label for="forwardNote">Optional note</label><textarea id="forwardNote" maxlength="60000"></textarea><label for="forwardFiles">Optional files</label><input id="forwardFiles" type="file" multiple /><button id="forwardButton" class="full-button" type="submit">Forward message</button></form>
             </div>
             <div id="noThread" class="empty">Select a managed conversation after loading the inbox.</div>
           </section>
         </div>
       </section>
     </main>
-    <script src="frontend.js?v=auth-timeout-20260801"></script>
+    <script src="frontend.js?v=button-lock-fix-20260801"></script>
   </body>
 </html>

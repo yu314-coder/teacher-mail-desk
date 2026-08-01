@@ -232,14 +232,14 @@ function authenticatedRpc(method, args) {
 }
 
 function submitAccount(form, method, accountId, passwordId, codeId, buttonLabel) {
-  const button = form.querySelector('button[type="submit"]') || form.querySelector('button:not(.secondary)');
+  const button = $(method === 'signIn' ? 'loginButton' : 'registerButton');
   setBusy(button, true, buttonLabel);
   showAlert('');
   bridgeRpc(method, [$(accountId).value, $(passwordId).value, $(codeId).value]).then((result) => {
     portalSessionToken = result && result.sessionToken ? result.sessionToken : '';
     if (!portalSessionToken) throw new Error('The secure portal did not return a session.');
     setBusy(button, false);
-    form.reset();
+    if (form) form.reset();
     showDashboard();
   }).catch((error) => {
     setBusy(button, false);
@@ -248,12 +248,12 @@ function submitAccount(form, method, accountId, passwordId, codeId, buttonLabel)
 }
 
 function handleSend(form, method, args, successMessage, buttonLabel) {
-  const button = form.querySelector('button[type="submit"]');
+  const button = $({ sendMessage: 'composeButton', replyToThread: 'replyButton', forwardMessage: 'forwardButton' }[method]);
   setBusy(button, true, buttonLabel);
   showAlert('');
   authenticatedRpc(method, args).then(() => {
     setBusy(button, false);
-    form.reset();
+    if (form) form.reset();
     showAlert(successMessage, 'success');
     loadThreads();
   }).catch((error) => {
@@ -290,7 +290,7 @@ $('registerForm').addEventListener('submit', (event) => {
 $('composeForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const button = form.querySelector('button[type="submit"]');
+  const button = $('composeButton');
   setBusy(button, true, 'Sending…');
   try {
     const attachments = await readAttachments($('composeFiles'));
@@ -300,7 +300,7 @@ $('composeForm').addEventListener('submit', async (event) => {
 $('replyForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const button = form.querySelector('button[type="submit"]');
+  const button = $('replyButton');
   setBusy(button, true, 'Sending reply…');
   try {
     const attachments = await readAttachments($('replyFiles'));
@@ -310,7 +310,7 @@ $('replyForm').addEventListener('submit', async (event) => {
 $('forwardForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const button = form.querySelector('button[type="submit"]');
+  const button = $('forwardButton');
   setBusy(button, true, 'Forwarding…');
   try {
     const attachments = await readAttachments($('forwardFiles'));
