@@ -341,7 +341,7 @@ body.mailbox-open main {
 .allowed-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #5b9b70; }
 .sheet-link { display: block; margin-top: 22px; color: #5669d8; font-size: .74rem; text-decoration: none; }
 .sheet-link:hover { text-decoration: underline; }
-.mail-main .compose-card { margin: 20px 28px; padding: 20px; border: 1px solid #dfe3e8; background: #fbfcff; box-shadow: 0 8px 22px #20212412; }
+.mail-main .compose-card { position: fixed; right: 285px; bottom: 18px; z-index: 40; width: min(520px, calc(100vw - 330px)); max-height: calc(100vh - 110px); margin: 0; padding: 20px; overflow: auto; border: 1px solid #dfe3e8; background: #fbfcff; box-shadow: 0 14px 40px #20212426; }
 .compose-heading { justify-content: space-between; align-items: flex-start; }
 .compose-heading h2 { margin: 0; padding: 0; border: 0; color: #30343b; font-size: 1.15rem; }
 .mail-main .compose-card textarea { min-height: 150px; }
@@ -354,12 +354,14 @@ body.mailbox-open main {
   .mail-layout { grid-template-columns: 195px minmax(360px, 1fr) 225px; }
   .thread-row { grid-template-columns: minmax(110px, .4fr) minmax(160px, 1fr) 72px; padding-right: 18px; padding-left: 18px; }
   .mail-toolbar { padding-right: 18px; padding-left: 18px; }
+  .mail-main .compose-card { right: 245px; width: min(500px, calc(100vw - 275px)); }
 }
 
 @media (max-width: 860px) {
   .mail-layout { grid-template-columns: 190px minmax(0, 1fr); }
   .allowed-panel { grid-column: 1 / -1; border-top: 1px solid #e5e7eb; border-left: 0; }
   .allowed-list { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .mail-main .compose-card { right: 18px; width: min(520px, calc(100vw - 36px)); }
 }
 
 @media (max-width: 620px) {
@@ -381,6 +383,6 @@ body.mailbox-open main {
   .thread-preview { font-size: .69rem; }
   .thread-date { font-size: .64rem; }
   .thread-reader { margin: 0 14px 22px; padding-top: 18px; }
-  .mail-main .compose-card { margin: 14px; padding: 16px; }
+  .mail-main .compose-card { right: 12px; bottom: 12px; width: calc(100vw - 24px); max-height: calc(100vh - 92px); margin: 0; padding: 16px; }
   .allowed-panel { padding: 20px 14px; }
 }
