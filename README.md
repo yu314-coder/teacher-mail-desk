@@ -4,8 +4,8 @@ GitHub Pages is the complete visible frontend. A hidden Apps Script bridge is th
 
 ## Privacy boundary
 
-- The teacher uses only the GitHub Pages screen; they do not need to enter the Apps Script editor or Apps Script mailbox UI. A first-use Google consent prompt may still be required for the teacher's Gmail authorization.
-- The portal account itself uses an account name, password, and administrator access code; no teacher email field is shown. The Google identity is used privately by Apps Script to authorize Gmail access.
+- The teacher uses only the GitHub Pages screen; they do not need to enter the Apps Script editor, Apps Script mailbox UI, or authorize Gmail. The Apps Script web app executes as the owner, so real sends and reads come from the owner's Gmail.
+- The portal account itself uses an account name, password, and administrator access code; no teacher email field is shown. The owner Gmail identity remains inside Apps Script and the private Sheet logger.
 - The portal records each successful send as an allowlisted Gmail thread. Inbox reads fetch only those exact thread IDs from the private logger.
 - Unrelated Gmail messages, manually labelled messages, raw MIME, and attachments are not exposed in the portal.
 - Subjects/bodies with common financial or account-data signals are blocked before sending and hidden when received.
@@ -17,7 +17,7 @@ GitHub Pages is the complete visible frontend. A hidden Apps Script bridge is th
 ## Repository layout
 
 - `index.html`, `styles.css`, `frontend.js`: GitHub Pages interface for account entry, send, receive, reply, and forward.
-- `apps-script/portal`: hidden Apps Script bridge plus fallback web app; deploy as `USER_ACCESSING`.
+- `apps-script/portal`: hidden Apps Script bridge plus redirect-only web app; deploy as the owner with anonymous access.
 - `apps-script/logger`: private Apps Script logger bound to the owner's Google Sheet; deploy as `USER_DEPLOYING`.
 
 ## Required setup

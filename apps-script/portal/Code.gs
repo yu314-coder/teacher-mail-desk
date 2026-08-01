@@ -1,12 +1,13 @@
 /**
  * Teacher Mail Desk portal.
  *
- * Deploy this project as a web app executing as USER_ACCESSING. The teacher
- * must authorize the Gmail scopes for their own Google account. The GitHub
- * Pages shell only embeds this app; it never receives Gmail tokens.
+ * Deploy this project as a web app executing as the owner. The teacher never
+ * authorizes Gmail; Gmail sends and reads run through the owner's account.
+ * GitHub Pages only displays the interface and never receives Gmail tokens.
  */
 
 const PORTAL = {
+  pagesUrl: 'https://yu314-coder.github.io/teacher-mail-desk/',
   labelName: 'TeacherPortal/Managed',
   maxThreads: 40,
   maxBodyChars: 60000,
@@ -21,8 +22,7 @@ function doGet(e) {
       .setTitle('Teacher Mail Desk bridge')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Teacher Mail Desk')
+  return HtmlService.createHtmlOutput('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><p>Opening Teacher Mail Desk…</p><script>window.top.location.replace(' + JSON.stringify(PORTAL.pagesUrl) + ');</script></body></html>')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -34,7 +34,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const parameters = e && e.parameter ? e.parameter : {};
-    activeEmail_();
+    backendEmail_();
 
     const action = String(parameters.action || '').trim().toLowerCase();
     if (action === 'signin') {
@@ -77,51 +77,40 @@ function escapeHtml_(value) {
 }
 
 function getAppState() {
-  const email = activeEmail_();
-  if (!email) return { ok: false, code: 'GOOGLE_AUTH_REQUIRED', message: 'Sign in to the teacher Google account before opening the portal.' };
+  const email = backendEmail_();
   try {
     const registration = loggerCall_('sessionState', { email });
-    const token = userProperties_().getProperty(PORTAL.sessionProperty);
-    let authenticated = false;
-    if (token) {
-      try {
-        loggerCall_('authorize', { email, sessionToken: token });
-        authenticated = true;
-      } catch (ignored) {
-        userProperties_().deleteProperty(PORTAL.sessionProperty);
-      }
-    }
-    return { ok: true, email, registered: Boolean(registration.registered), authenticated };
+    return { ok: true, registered: Boolean(registration.registered), authenticated: false };
   } catch (error) {
     return { ok: false, code: 'PORTAL_SETUP_REQUIRED', message: publicError_(error) };
   }
 }
 
 function signUp(accountName, password, accessCode) {
-  const email = activeEmail_();
+  const email = backendEmail_();
   validateAccountInputs_(accountName, password, accessCode);
   const result = loggerCall_('register', { email, accountName, password, accessCode });
-  saveSession_(result.sessionToken);
-  return { ok: true, email, expiresAt: result.expiresAt };
+  return { ok: true, sessionToken: result.sessionToken, expiresAt: result.expiresAt };
 }
 
 function signIn(accountName, password, accessCode) {
-  const email = activeEmail_();
+  const email = backendEmail_();
   if (!String(accountName || '').trim()) throw new Error('Enter the account name.');
   if (!password || String(password).length < 6) throw new Error('Use a password with at least 6 characters.');
   if (!accessCode || String(accessCode).length < 4) throw new Error('Enter the administrator access code.');
   const result = loggerCall_('login', { email, accountName: String(accountName), password: String(password), accessCode: String(accessCode) });
-  saveSession_(result.sessionToken);
-  return { ok: true, email, expiresAt: result.expiresAt };
+  return { ok: true, sessionToken: result.sessionToken, expiresAt: result.expiresAt };
 }
 
-function signOut() {
-  userProperties_().deleteProperty(PORTAL.sessionProperty);
+function signOut(sessionToken) {
+  if (sessionToken) {
+    try { loggerCall_('logout', { email: backendEmail_(), sessionToken: String(sessionToken) }); } catch (ignored) {}
+  }
   return { ok: true };
 }
 
-function listManagedThreads() {
-  const email = requireSession_();
+function listManagedThreads(sessionToken) {
+  const email = requireSession_(sessionToken);
   const allowed = loggerCall_('listThreads', { email }).slice(0, PORTAL.maxThreads);
   ensureManagedLabel_();
   const result = [];
@@ -142,8 +131,8 @@ function listManagedThreads() {
   return { ok: true, threads: result };
 }
 
-function sendMessage(to, subject, body, attachments) {
-  const email = requireSession_();
+function sendMessage(sessionToken, to, subject, body, attachments) {
+  const email = requireSession_(sessionToken);
   const recipients = parseRecipients_(to);
   const cleanSubject = cleanText_(subject, 180);
   const cleanBody = cleanText_(body, PORTAL.maxBodyChars);
@@ -163,8 +152,8 @@ function sendMessage(to, subject, body, attachments) {
   return { ok: true, sent: true };
 }
 
-function replyToThread(threadId, body, attachments) {
-  const email = requireSession_();
+function replyToThread(sessionToken, threadId, body, attachments) {
+  const email = requireSession_(sessionToken);
   const allowed = allowedThreadMap_(email);
   const id = cleanText_(threadId, 160);
   const record = allowed[id];
@@ -197,8 +186,8 @@ function replyToThread(threadId, body, attachments) {
   return { ok: true, sent: true };
 }
 
-function forwardMessage(threadId, messageId, to, note, attachments) {
-  const email = requireSession_();
+function forwardMessage(sessionToken, threadId, messageId, to, note, attachments) {
+  const email = requireSession_(sessionToken);
   const allowed = allowedThreadMap_(email);
   const id = cleanText_(threadId, 160);
   const record = allowed[id];
@@ -237,15 +226,15 @@ function forwardMessage(threadId, messageId, to, note, attachments) {
   return { ok: true, sent: true };
 }
 
-function setupMailbox() {
-  requireSession_();
+function setupMailbox(sessionToken) {
+  requireSession_(sessionToken);
   ensureManagedLabel_();
   return { ok: true, label: PORTAL.labelName };
 }
 
-function requireSession_() {
-  const email = activeEmail_();
-  const token = userProperties_().getProperty(PORTAL.sessionProperty);
+function requireSession_(sessionToken) {
+  const email = backendEmail_();
+  const token = String(sessionToken || '').trim();
   if (!token) throw new Error('Sign in to the teacher portal first.');
   loggerCall_('authorize', { email, sessionToken: token });
   return email;
@@ -512,18 +501,14 @@ function header_(message, name) {
 }
 
 function validateAccountInputs_(accountName, password, accessCode) {
-  if (!activeEmail_()) throw new Error('Sign in to the teacher Google account first.');
   if (!String(accountName || '').trim()) throw new Error('Enter the account name.');
   if (String(password || '').length < 6) throw new Error('Use a password with at least 6 characters.');
   if (String(accessCode || '').length < 4) throw new Error('Enter the access code supplied by the administrator.');
 }
 
-function saveSession_(token) { userProperties_().setProperty(PORTAL.sessionProperty, String(token)); }
-function userProperties_() { return PropertiesService.getUserProperties(); }
-
-function activeEmail_() {
-  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
-  if (!isEmail_(email)) throw new Error('The teacher Google account could not be identified. Open the web app while signed in to one Google account.');
+function backendEmail_() {
+  const email = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  if (!isEmail_(email)) throw new Error('The private Gmail backend account could not be identified.');
   return email;
 }
 

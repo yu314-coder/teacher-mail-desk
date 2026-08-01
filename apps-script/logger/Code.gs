@@ -85,6 +85,7 @@ function handleOperation_(operation, payload) {
     case 'sessionState': return sessionState_(payload);
     case 'register': return register_(payload);
     case 'login': return login_(payload);
+    case 'logout': return logout_(payload);
     case 'authorize': return authorize_(payload);
     case 'recordThread': return recordThread_(payload);
     case 'listThreads': return listThreads_(payload);
@@ -208,6 +209,16 @@ function authorize_(payload) {
     return { authorized: true };
   }
   throw new Error('The portal session is not valid.');
+}
+
+function logout_(payload) {
+  const email = normalizedEmail_(payload.email);
+  const token = String(payload.sessionToken || '');
+  if (token.length < 24) return { loggedOut: true };
+  const sessionHash = hash_(token, 'session');
+  const row = readRows_(sheetFor_('sessions')).find((item) => item.sessionHash === sessionHash && item.email === email && item.status === 'active');
+  if (row) updateRow_(sheetFor_('sessions'), row.row, row.headers, { status: 'revoked', lastUsedAt: new Date() });
+  return { loggedOut: true };
 }
 
 function recordThread_(payload) {

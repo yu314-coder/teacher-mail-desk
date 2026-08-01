@@ -42,7 +42,7 @@ function bridgeRpc(method, args) {
       const pending = bridgePending.get(id);
       if (!pending) return;
       bridgePending.delete(id);
-      pending.reject(new Error('The secure Google connection did not respond. Open the authorization link and try again.'));
+      pending.reject(new Error('The private Gmail backend did not respond. Try again in a moment.'));
     }, 30000);
   });
 }
@@ -68,6 +68,7 @@ window.addEventListener('message', (event) => {
 let currentThreads = [];
 let selectedThreadId = '';
 let selectedMessageId = '';
+let portalSessionToken = '';
 
 function showAlert(message, type = 'error') {
   const container = $('alertContainer');
@@ -93,7 +94,8 @@ function showDashboard() {
   $('loginContainer').classList.add('hidden');
   $('registerContainer').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
-  loadThreads();
+  $('statusLabel').textContent = 'Connecting to managed Gmail…';
+  authenticatedRpc('setupMailbox', []).then(loadThreads).catch((error) => showAlert(messageText(error)));
 }
 
 function hideDashboard() {
@@ -209,7 +211,7 @@ function selectThread(id) {
 
 function loadThreads() {
   $('statusLabel').textContent = 'Loading managed conversations…';
-  bridgeRpc('listManagedThreads', []).then((result) => {
+  authenticatedRpc('listManagedThreads', []).then((result) => {
     currentThreads = result && result.threads ? result.threads : [];
     $('statusLabel').textContent = currentThreads.length + ' managed thread' + (currentThreads.length === 1 ? '' : 's');
     renderThreads();
@@ -220,11 +222,18 @@ function loadThreads() {
   });
 }
 
+function authenticatedRpc(method, args) {
+  if (!portalSessionToken) return Promise.reject(new Error('Sign in to the teacher portal first.'));
+  return bridgeRpc(method, [portalSessionToken].concat(args || []));
+}
+
 function submitAccount(form, method, accountId, passwordId, codeId, buttonLabel) {
   const button = form.querySelector('button[type="submit"]');
   setBusy(button, true, buttonLabel);
   showAlert('');
-  bridgeRpc(method, [$(accountId).value, $(passwordId).value, $(codeId).value]).then(() => {
+  bridgeRpc(method, [$(accountId).value, $(passwordId).value, $(codeId).value]).then((result) => {
+    portalSessionToken = result && result.sessionToken ? result.sessionToken : '';
+    if (!portalSessionToken) throw new Error('The secure portal did not return a session.');
     setBusy(button, false);
     form.reset();
     showDashboard();
@@ -238,7 +247,7 @@ function handleSend(form, method, args, successMessage, buttonLabel) {
   const button = form.querySelector('button[type="submit"]');
   setBusy(button, true, buttonLabel);
   showAlert('');
-  bridgeRpc(method, args).then(() => {
+  authenticatedRpc(method, args).then(() => {
     setBusy(button, false);
     form.reset();
     showAlert(successMessage, 'success');
@@ -260,7 +269,6 @@ function showState(state) {
 
 $('showRegisterBtn').addEventListener('click', showRegister);
 $('showLoginBtn').addEventListener('click', showLogin);
-$('authorizeLink').href = APP_SCRIPT_URL;
 $('loginForm').addEventListener('submit', (event) => {
   event.preventDefault();
   submitAccount(event.currentTarget, 'signIn', 'loginAccountName', 'loginPassword', 'loginAccessCode', 'Signing in…');
@@ -292,10 +300,11 @@ $('forwardForm').addEventListener('submit', async (event) => {
 });
 $('refreshButton').addEventListener('click', loadThreads);
 $('signoutButton').addEventListener('click', () => {
-  bridgeRpc('signOut', []).then(() => {
+  authenticatedRpc('signOut', []).then(() => {
+    portalSessionToken = '';
     hideDashboard();
     showAlert('You have been signed out.', 'success');
   }).catch((error) => showAlert(messageText(error)));
 });
 
-bridgeRpc('getAppState', []).then(showState).catch((error) => showAlert(messageText(error) + ' ' + 'Use the Google authorization link above if this is the first visit.'));
+bridgeRpc('getAppState', []).then(showState).catch((error) => showAlert(messageText(error)));
