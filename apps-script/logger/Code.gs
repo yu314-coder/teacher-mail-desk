@@ -99,6 +99,7 @@ function handleOperation_(operation, payload) {
     case 'recordThread': return recordThread_(payload);
     case 'listThreads': return listThreads_(payload);
     case 'listAllowedSenders': return listAllowedSenders_(payload);
+    case 'ensureAllowedSenders': return ensureAllowedSenders_(payload);
     case 'audit': return recordAudit_(payload);
     case 'messageAudit': return messageAudit_(payload);
     default: throw new Error('Unknown logger operation.');
@@ -258,7 +259,6 @@ function recordThread_(payload) {
   const threadId = cleanText_(payload.threadId, 160);
   const recipient = cleanText_(payload.recipient, 500);
   if (!threadId) throw new Error('A Gmail thread ID is required.');
-  if (!recipient) throw new Error('A recipient is required.');
   const sheet = sheetFor_('threads');
   const existing = readRows_(sheet).find((row) => row.email === email && row.threadId === threadId);
   if (existing) {
@@ -308,6 +308,31 @@ function listAllowedSenders_(payload) {
     .filter((row) => allowedSenderStatus_(row.status))
     .map((row) => senderEmail_(row.email))
     .filter((email) => email && !seen[email] && (seen[email] = true));
+}
+
+function ensureAllowedSenders_(payload) {
+  const email = normalizedEmail_(payload.email);
+  if (payload.sessionToken) authorize_(payload);
+  const senders = Array.from(new Set((Array.isArray(payload.senders) ? payload.senders : []).map(senderEmail_).filter(Boolean)));
+  if (senders.length) {
+    const sheet = sheetFor_('allowedSenders');
+    const rows = readRows_(sheet);
+    const existing = {};
+    rows.forEach((row) => {
+      const sender = senderEmail_(row.email);
+      if (sender) existing[sender] = row;
+    });
+    senders.forEach((sender) => {
+      if (existing[sender]) return;
+      sheet.appendRow([sender, 'active', new Date(), 'Auto-allowed after a portal send; delete or mark inactive to remove.']);
+    });
+  }
+  if (payload.sessionToken) {
+    const token = String(payload.sessionToken || '');
+    const cacheKey = 'teacher-mail-desk:mailbox:' + hash_(email + '|' + token, 'mailbox').slice(0, 48);
+    CacheService.getScriptCache().remove(cacheKey);
+  }
+  return { allowedSenders: listAllowedSenders_({ email }) };
 }
 
 function allowedSenderStatus_(value) {

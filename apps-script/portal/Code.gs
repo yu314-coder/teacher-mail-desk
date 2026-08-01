@@ -162,7 +162,16 @@ function signOut(sessionToken) {
 function listManagedThreads(sessionToken) {
   const email = backendEmail_();
   const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
-  const allowedSenders = new Set(snapshot.allowedSenders || []);
+  let allowedSenders = new Set(snapshot.allowedSenders || []);
+  if (!allowedSenders.size) {
+    const sentRecipients = extractEmails_((snapshot.messages || []).map((audit) => audit && audit.to).join(' '));
+    if (sentRecipients.length) {
+      try {
+        const seeded = loggerCall_('ensureAllowedSenders', { email, sessionToken, senders: sentRecipients });
+        if (seeded && Array.isArray(seeded.allowedSenders)) allowedSenders = new Set(seeded.allowedSenders);
+      } catch (ignored) {}
+    }
+  }
   const auditByThreadId = {};
   (snapshot.messages || []).forEach((audit) => {
     if (!audit) return;
@@ -363,6 +372,7 @@ function sendMessage(sessionToken, to, subject, body, attachments) {
   ensureManagedLabel_();
   addManagedLabel_(sent.threadId);
   loggerCall_('recordThread', { email, threadId: sent.threadId, recipient: recipients.join(', ') });
+  try { loggerCall_('ensureAllowedSenders', { email, sessionToken, senders: recipients }); } catch (ignored) {}
   recordAudit_(email, 'send', sent.threadId, sent.id || '', 'success', '');
   recordMessageAudit_(email, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, recipients, cleanSubject, cleanBody, sent, safeAttachments);
@@ -681,7 +691,7 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
 
   // Recover older conversations already marked by this portal, even if an
   // older portal version did not yet write the thread row to the Sheet.
-  if (Object.keys(byId).length < PORTAL.maxThreads) {
+  if ((!preloadedRecords || !preloadedRecords.length) && Object.keys(byId).length < PORTAL.maxThreads) {
     try {
       const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
       if (managedLabel) {
@@ -697,9 +707,10 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
   // A Sheet-approved sender may start a brand-new Gmail thread instead of
   // replying to a portal-created message. Discover those threads and bring
   // them inside the same managed boundary so the teacher can reply here.
-  if (allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) Array.from(allowedSenders).slice(0, 20).forEach((sender) => {
+  if (allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) {
     try {
-      const response = Gmail.Users.Threads.list('me', { q: 'from:' + sender, maxResults: 20 });
+      const senderQuery = '{' + Array.from(allowedSenders).slice(0, 20).map((sender) => 'from:' + sender).join(' ') + '}';
+      const response = Gmail.Users.Threads.list('me', { q: senderQuery, maxResults: PORTAL.maxThreads });
       (response.threads || []).forEach((thread) => {
         const threadId = String(thread.id || '').trim();
         if (!threadId) return;
@@ -707,13 +718,17 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords) {
           byId[threadId].inbound = true;
           return;
         }
-        const record = { threadId, recipient: sender, createdAt: '', lastSeenAt: '', inbound: true };
+        const record = { threadId, recipient: '', createdAt: '', lastSeenAt: '', inbound: true };
         byId[threadId] = record;
-        try { loggerCall_('recordThread', { email, threadId, recipient: sender }); } catch (ignored) {}
+        try { loggerCall_('recordThread', { email, threadId, recipient: '' }); } catch (ignored) {}
       });
     } catch (ignored) {}
-  });
+  }
   return Object.keys(byId).map((threadId) => byId[threadId]);
+}
+
+function extractEmails_(value) {
+  return Array.from(new Set(String(value || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])).map((email) => email.toLowerCase()).filter(isEmail_);
 }
 
 function dateValue_(value) {

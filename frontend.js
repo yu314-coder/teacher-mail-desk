@@ -175,7 +175,7 @@ function renderAllowedSenders() {
   if (!currentAllowedSenders.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = 'No sender addresses approved yet.';
+    empty.textContent = 'No approved senders yet. Send a message to add its recipient automatically, or add an address in the AllowedSenders Sheet tab.';
     list.appendChild(empty);
     return;
   }
