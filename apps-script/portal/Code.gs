@@ -83,7 +83,7 @@ function bridgeResponse_(requestId, nonce, ok, result, error) {
     result: ok ? result : null,
     error: ok ? '' : String(error || 'Request failed.'),
   }).replace(/</g, '\\u003c');
-  return HtmlService.createHtmlOutput('<!doctype html><html><body><script>window.parent.postMessage(' + message + ', "*");</script></body></html>')
+  return HtmlService.createHtmlOutput('<!doctype html><html><body><script>window.top.postMessage(' + message + ', "*");</script></body></html>')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 

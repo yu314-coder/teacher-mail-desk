@@ -56,7 +56,6 @@ function bridgeRpc(method, args) {
 }
 
 window.addEventListener('message', (event) => {
-  if (event.source !== bridgeFrame.contentWindow) return;
   const data = event.data || {};
   if (data.nonce !== bridgeNonce) return;
   if (data.type !== 'teacher-mail-desk:response') return;
