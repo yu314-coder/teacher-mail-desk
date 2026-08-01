@@ -83,18 +83,18 @@ function showAlert(message, type = 'error') {
 }
 
 function showLogin() {
-  $('loginContainer').classList.remove('hidden');
-  $('registerContainer').classList.add('hidden');
+  $('loginForm').classList.remove('hidden');
+  $('registerForm').classList.add('hidden');
 }
 
 function showRegister() {
-  $('loginContainer').classList.add('hidden');
-  $('registerContainer').classList.remove('hidden');
+  $('loginForm').classList.add('hidden');
+  $('registerForm').classList.remove('hidden');
 }
 
 function showDashboard() {
-  $('loginContainer').classList.add('hidden');
-  $('registerContainer').classList.add('hidden');
+  $('loginForm').classList.add('hidden');
+  $('registerForm').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
   $('statusLabel').textContent = 'Connecting to managed Gmail…';
   authenticatedRpc('setupMailbox', []).then(loadThreads).catch((error) => showAlert(messageText(error)));
@@ -102,8 +102,8 @@ function showDashboard() {
 
 function hideDashboard() {
   $('dashboardContainer').classList.add('hidden');
-  $('loginContainer').classList.remove('hidden');
-  $('registerContainer').classList.add('hidden');
+  $('loginForm').classList.remove('hidden');
+  $('registerForm').classList.add('hidden');
   currentThreads = [];
   selectedThreadId = '';
   selectedMessageId = '';
