@@ -288,11 +288,11 @@ function threadSummary_(record, email, audits) {
     createdAt: String(record.createdAt || ''),
     lastSeenAt: String(record.lastSeenAt || ''),
     lastMessageAt: latest ? String(latest.timestamp || record.lastSeenAt || record.createdAt || '') : String(record.lastSeenAt || record.createdAt || ''),
-    sender: latest && latest.from ? addressFrom_(latest.from) : String(record.recipient || ''),
+    sender: latest && latest.from ? addressFrom_(latest.from) : String(record.sender || record.recipient || (record.inbound ? 'Allowed sender' : '')),
     hasInbound: Boolean(record.inbound),
     hasSent,
-    subject: latest ? safeDisplayText_(latest.subject || 'Private conversation', 180) : 'Managed conversation',
-    preview: latest && latest.body ? safeDisplayText_(latest.body, 220) : 'Open to load the complete conversation.',
+    subject: latest ? safeDisplayText_(latest.subject || 'Private conversation', 180) : safeDisplayText_(record.subject || (record.inbound ? 'Incoming message' : 'Managed conversation'), 180),
+    preview: latest && latest.body ? safeDisplayText_(latest.body, 220) : safeDisplayText_(record.preview || 'Open to load the complete conversation.', 220),
     messageCount: threadAudits.length,
     loaded: false,
     messages: [],
@@ -742,11 +742,14 @@ function managedThreadRecords_(email, allowedSenders, preloadedRecords, discover
       (response.threads || []).forEach((thread) => {
         const threadId = String(thread.id || '').trim();
         if (!threadId) return;
+        const preview = safeDisplayText_(thread.snippet || '', 220);
         if (byId[threadId]) {
           byId[threadId].inbound = true;
+          if (preview) byId[threadId].preview = preview;
+          if (!byId[threadId].sender) byId[threadId].sender = 'Allowed sender';
           return;
         }
-        const record = { threadId, recipient: '', createdAt: '', lastSeenAt: '', inbound: true };
+        const record = { threadId, recipient: '', createdAt: '', lastSeenAt: '', inbound: true, preview, sender: 'Allowed sender' };
         byId[threadId] = record;
         discovered.push({ threadId, recipient: '' });
       });

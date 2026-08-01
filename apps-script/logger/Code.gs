@@ -295,14 +295,17 @@ function recordThreads_(payload) {
 
 function listThreads_(payload) {
   const email = normalizedEmail_(payload.email);
-  return readRows_(sheetFor_('threads'))
+  const unique = {};
+  readRows_(sheetFor_('threads'))
     .filter((row) => row.email === email && row.status === 'active')
     .slice(-100)
     .reverse()
-    .map((row) => {
+    .forEach((row) => {
+      if (!row.threadId || unique[row.threadId]) return;
       const recipient = String(row.recipient || '').trim();
-      return { threadId: row.threadId, recipient, inbound: !recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt };
+      unique[row.threadId] = { threadId: row.threadId, recipient, inbound: !recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt };
     });
+  return Object.keys(unique).map((threadId) => unique[threadId]);
 }
 
 function listMessageAudits_(payload) {

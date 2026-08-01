@@ -155,6 +155,16 @@ function updateFolderCounts() {
   $('sentCount').textContent = currentThreads.filter((thread) => thread.hasSent).length;
 }
 
+function uniqueThreads(threads) {
+  const seen = new Set();
+  return (threads || []).filter((thread) => {
+    const id = String(thread && thread.threadId || '');
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 function setFolder(folder) {
   activeFolder = folder;
   document.querySelectorAll('[data-folder]').forEach((button) => {
@@ -430,7 +440,7 @@ function loadThreads() {
   $('statusLabel').textContent = 'Loading managed conversations…';
   authenticatedRpc('listManagedThreads', []).then((result) => {
     showAlert('');
-    currentThreads = result && result.threads ? result.threads : [];
+    currentThreads = uniqueThreads(result && result.threads ? result.threads : []);
     currentAllowedSenders = result && result.allowedSenders ? result.allowedSenders : [];
     $('statusLabel').textContent = currentThreads.length + ' conversation' + (currentThreads.length === 1 ? '' : 's');
     updateFolderCounts();
@@ -458,7 +468,7 @@ function syncManagedInboxInBackground() {
   inboxSyncInFlight = true;
   authenticatedRpc('syncManagedInbox', []).then((result) => {
     const existing = new Map(currentThreads.map((thread) => [thread.threadId, thread]));
-    currentThreads = (result && result.threads ? result.threads : []).map((thread) => {
+    currentThreads = uniqueThreads(result && result.threads ? result.threads : []).map((thread) => {
       const previous = existing.get(thread.threadId);
       if (previous && previous.messages && previous.messages.length) {
         return Object.assign(thread, { messages: previous.messages, needsRemoteCheck: previous.needsRemoteCheck });
