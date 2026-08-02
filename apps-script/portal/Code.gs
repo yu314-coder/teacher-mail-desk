@@ -229,7 +229,11 @@ function getManagedThread(sessionToken, threadId) {
   const records = (snapshot.threads || []).filter((record) => record && String(record.threadId) === id);
   let record = records.length ? records[0] : null;
   let audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
-  if (record && audits.length) {
+  // Mailbox snapshots contain complete short bodies. Only fetch the full
+  // thread audit when a preview was actually truncated; this keeps normal
+  // short sent messages instant while preserving complete long messages.
+  const needsFullAudit = audits.some((audit) => String(audit.body || '').length >= 260);
+  if (record && audits.length && needsFullAudit) {
     try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
   }
   const hasBlankReceivedAudit = audits.some((audit) => String(audit.direction || '').toLowerCase() === 'received' && !String(audit.body || '').trim());
