@@ -340,9 +340,10 @@ function recordThreads_(payload) {
   const rows = [];
   items.forEach((item) => {
     const threadId = cleanText_(item && item.threadId, 160);
-    if (!threadId || existing[threadId]) return;
+    const recipient = cleanText_(item && item.recipient, 500);
+    if (!threadId || !recipient || existing[threadId]) return;
     existing[threadId] = true;
-    rows.push([email, threadId, cleanText_(item && item.recipient, 500), new Date(), new Date(), 'active']);
+    rows.push([email, threadId, recipient, new Date(), new Date(), 'active']);
   });
   if (rows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.threads.headers.length).setValues(rows);
@@ -355,13 +356,16 @@ function listThreads_(payload) {
   const email = normalizedEmail_(payload.email);
   const unique = {};
   readRows_(sheetFor_('threads'))
-    .filter((row) => row.email === email && row.status === 'active')
+    // A conversation is managed only after this portal records its first
+    // outbound send. Older inbound-only discovery rows stay in the Sheet for
+    // audit history but are never returned to the teacher mailbox.
+    .filter((row) => row.email === email && row.status === 'active' && String(row.recipient || '').trim())
     .slice(-100)
     .reverse()
     .forEach((row) => {
       if (!row.threadId || unique[row.threadId]) return;
       const recipient = String(row.recipient || '').trim();
-      unique[row.threadId] = { threadId: row.threadId, recipient, inbound: !recipient, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt };
+      unique[row.threadId] = { threadId: row.threadId, recipient, inbound: false, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt };
     });
   return Object.keys(unique).map((threadId) => unique[threadId]);
 }

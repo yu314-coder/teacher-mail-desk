@@ -75,8 +75,6 @@ let selectedThreadId = '';
 let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
-let inboxSyncInFlight = false;
-let inboxSyncTimer = 0;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
@@ -119,7 +117,6 @@ function hideDashboard() {
   activeFolder = 'all';
   selectedThreadId = '';
   selectedMessageId = '';
-  window.clearTimeout(inboxSyncTimer);
 }
 
 function setBusy(button, busy, label) {
@@ -472,10 +469,6 @@ function loadThreads() {
     renderAllowedSenders();
     renderThreads();
     if (selectedThreadId) selectThread(selectedThreadId);
-    window.clearTimeout(inboxSyncTimer);
-    // Let the first list render and the teacher's first click finish before
-    // running the slower Gmail sender search in the background.
-    inboxSyncTimer = window.setTimeout(syncManagedInboxInBackground, 3500);
   }).catch((error) => {
     $('statusLabel').textContent = '';
     const list = $('threadList');
@@ -488,30 +481,6 @@ function loadThreads() {
     showAlert(messageText(error));
   }).finally(() => {
     mailboxLoadInFlight = false;
-  });
-}
-
-function syncManagedInboxInBackground() {
-  if (inboxSyncInFlight || !portalSessionToken) return;
-  inboxSyncInFlight = true;
-  authenticatedRpc('syncManagedInbox', []).then((result) => {
-    const existing = new Map(currentThreads.map((thread) => [thread.threadId, thread]));
-    currentThreads = uniqueThreads(result && result.threads ? result.threads : []).map((thread) => {
-      const previous = existing.get(thread.threadId);
-      if (previous && previous.messages && previous.messages.length) {
-        return Object.assign(thread, { messages: previous.messages, needsRemoteCheck: previous.needsRemoteCheck });
-      }
-      return thread;
-    });
-    currentAllowedSenders = result && result.allowedSenders ? result.allowedSenders : currentAllowedSenders;
-    $('statusLabel').textContent = currentThreads.length + ' conversation' + (currentThreads.length === 1 ? '' : 's');
-    updateFolderCounts();
-    renderAllowedSenders();
-    renderThreads();
-  }).catch(() => {
-    // Inbox discovery is deliberately non-blocking; All mail remains usable.
-  }).finally(() => {
-    inboxSyncInFlight = false;
   });
 }
 

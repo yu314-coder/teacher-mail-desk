@@ -240,18 +240,7 @@ function getManagedThread(sessionToken, threadId) {
     summary.messageCount = 0;
     return { ok: true, thread: summary };
   }
-  const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
-
-  // Older portal versions could label a managed thread before the Sheet row
-  // was written. Accept that thread only when Gmail confirms the private
-  // portal label, never from a client-supplied ID alone.
-  if (!record) {
-    const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
-    const hasManagedLabel = Boolean(managedLabel && (thread.messages || []).some((message) => (message.labelIds || []).indexOf(managedLabel.id) >= 0));
-    if (!hasManagedLabel) throw new Error('That conversation was not started through this portal.');
-    record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
-  }
-  return { ok: true, thread: threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(audits)) };
+  throw new Error('That conversation was not started with a portal send.');
 }
 
 function getManagedThreadRemote(sessionToken, threadId) {
@@ -265,13 +254,9 @@ function getManagedThreadRemote(sessionToken, threadId) {
   if (audits.length) {
     try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
   }
+  if (!record) throw new Error('That conversation was not started with a portal send.');
   const gmailThread = GmailApp.getThreadById(id);
   if (!gmailThread) throw new Error('The Gmail conversation could not be found.');
-  if (!record) {
-    const labels = gmailThread.getLabels().map((label) => label.getName());
-    if (labels.indexOf(PORTAL.labelName) < 0) throw new Error('That conversation was not started through this portal.');
-    record = { threadId: id, recipient: '', createdAt: '', lastSeenAt: '' };
-  }
   return { ok: true, thread: gmailAppThreadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(audits)) };
 }
 
@@ -838,54 +823,17 @@ function allowedSendersFor_(email) {
 }
 
 function managedThreadRecords_(email, allowedSenders, preloadedRecords, discoverInbound) {
-  const records = (preloadedRecords || loggerCall_('listThreads', { email })).slice(-100).reverse();
+  // The first outbound portal send is the hard boundary. Do not discover or
+  // import historical Gmail conversations merely because an address is on the
+  // AllowedSenders list; only replies in a recorded portal thread are shown.
+  const records = (preloadedRecords || loggerCall_('listThreads', { email }))
+    .filter((record) => record && record.threadId && String(record.recipient || '').trim())
+    .slice(-100)
+    .reverse();
   const byId = {};
-  const discovered = [];
   records.forEach((record) => {
-    if (record && record.threadId) byId[record.threadId] = record;
+    byId[record.threadId] = record;
   });
-
-  // Recover older conversations already marked by this portal, even if an
-  // older portal version did not yet write the thread row to the Sheet.
-  if (discoverInbound && (!preloadedRecords || !preloadedRecords.length) && Object.keys(byId).length < PORTAL.maxThreads) {
-    try {
-      const managedLabel = (Gmail.Users.Labels.list('me').labels || []).find((label) => label.name === PORTAL.labelName);
-      if (managedLabel) {
-        const response = Gmail.Users.Threads.list('me', { labelIds: [managedLabel.id], maxResults: PORTAL.maxThreads });
-        (response.threads || []).forEach((thread) => {
-          const threadId = String(thread.id || '').trim();
-          if (threadId && !byId[threadId]) byId[threadId] = { threadId, recipient: '', createdAt: '', lastSeenAt: '' };
-        });
-      }
-    } catch (ignored) {}
-  }
-
-  // A Sheet-approved sender may start a brand-new Gmail thread instead of
-  // replying to a portal-created message. Discover those threads and bring
-  // them inside the same managed boundary so the teacher can reply here.
-  if (discoverInbound && allowedSenders && allowedSenders.size && Object.keys(byId).length < PORTAL.maxThreads) {
-    try {
-      const senderQuery = '{' + Array.from(allowedSenders).slice(0, 20).map((sender) => 'from:' + sender).join(' ') + '}';
-      const response = Gmail.Users.Threads.list('me', { q: senderQuery, maxResults: PORTAL.maxThreads });
-      (response.threads || []).forEach((thread) => {
-        const threadId = String(thread.id || '').trim();
-        if (!threadId) return;
-        const preview = safeDisplayText_(thread.snippet || '', 220);
-        if (byId[threadId]) {
-          byId[threadId].inbound = true;
-          if (preview) byId[threadId].preview = preview;
-          if (!byId[threadId].sender) byId[threadId].sender = 'Allowed sender';
-          return;
-        }
-        const record = { threadId, recipient: '', createdAt: '', lastSeenAt: '', inbound: true, preview, sender: 'Allowed sender' };
-        byId[threadId] = record;
-        discovered.push({ threadId, recipient: '' });
-      });
-    } catch (ignored) {}
-  }
-  if (discovered.length) {
-    try { loggerCall_('recordThreads', { email, threads: discovered }); } catch (ignored) {}
-  }
   return Object.keys(byId).map((threadId) => byId[threadId]);
 }
 
