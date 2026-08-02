@@ -16,6 +16,12 @@ const PORTAL = {
   sessionProperty: 'PORTAL_SESSION_TOKEN',
 };
 
+const PORTAL_CACHE = {
+  mailboxSeconds: 30,
+};
+
+let portalMailboxMemory = {};
+
 function doGet(e) {
   if (e && e.parameter && e.parameter.bridge === '1') {
     return HtmlService.createHtmlOutputFromFile('Bridge')
@@ -156,21 +162,28 @@ function signIn(accountName, password, accessCode) {
 
 function signOut(sessionToken) {
   if (sessionToken) {
-    try { loggerCall_('logout', { email: backendEmail_(), sessionToken: String(sessionToken) }); } catch (ignored) {}
+    const email = backendEmail_();
+    clearPortalMailboxCache_(email, sessionToken);
+    try { loggerCall_('logout', { email, sessionToken: String(sessionToken) }); } catch (ignored) {}
   }
   return { ok: true };
 }
 
 function listManagedThreads(sessionToken) {
   const email = backendEmail_();
-  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const snapshot = portalMailboxSnapshot_(email, sessionToken);
   let allowedSenders = new Set(snapshot.allowedSenders || []);
   if (!allowedSenders.size) {
     const sentRecipients = extractEmails_((snapshot.messages || []).map((audit) => audit && audit.to).join(' '));
     if (sentRecipients.length) {
       try {
         const seeded = loggerCall_('ensureAllowedSenders', { email, sessionToken, senders: sentRecipients });
-        if (seeded && Array.isArray(seeded.allowedSenders)) allowedSenders = new Set(seeded.allowedSenders);
+        if (seeded && Array.isArray(seeded.allowedSenders)) {
+          allowedSenders = new Set(seeded.allowedSenders);
+          snapshot.allowedSenders = Array.from(allowedSenders);
+          const key = portalMailboxCacheKey_(email, sessionToken);
+          try { CacheService.getScriptCache().put(key, JSON.stringify(snapshot), PORTAL_CACHE.mailboxSeconds); } catch (ignored) {}
+        }
       } catch (ignored) {}
     }
   }
@@ -193,7 +206,7 @@ function listManagedThreads(sessionToken) {
 
 function syncManagedInbox(sessionToken) {
   const email = backendEmail_();
-  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const auditByThreadId = {};
   (snapshot.messages || []).forEach((audit) => {
@@ -211,7 +224,7 @@ function getManagedThread(sessionToken, threadId) {
   const email = backendEmail_();
   const id = cleanText_(threadId, 160);
   if (!id) throw new Error('Choose a conversation first.');
-  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const records = (snapshot.threads || []).filter((record) => record && String(record.threadId) === id);
   let record = records.length ? records[0] : null;
@@ -247,7 +260,7 @@ function getManagedThreadRemote(sessionToken, threadId) {
   const email = backendEmail_();
   const id = cleanText_(threadId, 160);
   if (!id) throw new Error('Choose a conversation first.');
-  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken });
+  const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   let record = (snapshot.threads || []).find((item) => item && String(item.threadId) === id) || null;
   let audits = (snapshot.messages || []).filter((audit) => audit && String(audit.threadId || '') === id);
@@ -276,6 +289,46 @@ function cacheReceivedThread_(email, sessionToken, thread) {
     }));
   if (!messages.length) return;
   try { loggerCall_('cacheMessages', { email, sessionToken, messages }); } catch (ignored) {}
+  clearPortalMailboxCache_(email, sessionToken);
+}
+
+function portalMailboxSnapshot_(email, sessionToken) {
+  const token = String(sessionToken || '').trim();
+  if (!token) throw new Error('Sign in to the teacher portal first.');
+  const key = portalMailboxCacheKey_(email, token);
+  if (portalMailboxMemory[key]) return portalMailboxMemory[key];
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(key);
+  if (cached) {
+    try {
+      const snapshot = JSON.parse(cached);
+      portalMailboxMemory[key] = snapshot;
+      return snapshot;
+    } catch (ignored) {}
+  }
+  const snapshot = loggerCall_('mailboxSnapshot', { email, sessionToken: token });
+  portalMailboxMemory[key] = snapshot;
+  try { cache.put(key, JSON.stringify(snapshot), PORTAL_CACHE.mailboxSeconds); } catch (ignored) {}
+  return snapshot;
+}
+
+function portalMailboxCacheKey_(email, sessionToken) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(email || '').toLowerCase() + '|' + String(sessionToken || ''),
+    Utilities.Charset.UTF_8
+  );
+  const hex = bytes.map((byte) => {
+    const normalized = byte < 0 ? byte + 256 : byte;
+    return (normalized < 16 ? '0' : '') + normalized.toString(16);
+  }).join('');
+  return 'teacher-mail-desk:portal-mailbox:' + hex.slice(0, 48);
+}
+
+function clearPortalMailboxCache_(email, sessionToken) {
+  const key = portalMailboxCacheKey_(email, sessionToken);
+  delete portalMailboxMemory[key];
+  try { CacheService.getScriptCache().remove(key); } catch (ignored) {}
 }
 
 function groupAuditsByMessage_(audits) {
@@ -417,12 +470,13 @@ function sendMessage(sessionToken, to, subject, body, attachments) {
   recordAudit_(email, 'send', sent.threadId, sent.id || '', 'success', '');
   recordMessageAudit_(email, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, recipients, cleanSubject, cleanBody, sent, safeAttachments);
+  clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
 
 function replyToThread(sessionToken, threadId, body, attachments) {
   const email = requireSession_(sessionToken);
-  const allowed = allowedThreadMap_(email);
+  const allowed = allowedThreadMap_(email, sessionToken);
   const id = cleanText_(threadId, 160);
   const record = allowed[id];
   if (!record) throw new Error('That conversation was not started through this portal.');
@@ -433,7 +487,7 @@ function replyToThread(sessionToken, threadId, body, attachments) {
 
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
   const inbound = latestInbound_(thread, email);
-  if (inbound && !allowedSendersFor_(email).has(addressFrom_(header_(inbound, 'From')))) {
+  if (inbound && !allowedSendersFor_(email, sessionToken).has(addressFrom_(header_(inbound, 'From')))) {
     recordAudit_(email, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
@@ -457,12 +511,13 @@ function replyToThread(sessionToken, threadId, body, attachments) {
   recordAudit_(email, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
   recordMessageAudit_(email, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, [recipient], replySubject, cleanBody, sent, safeAttachments);
+  clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
 
 function forwardMessage(sessionToken, threadId, messageId, to, note, attachments) {
   const email = requireSession_(sessionToken);
-  const allowed = allowedThreadMap_(email);
+  const allowed = allowedThreadMap_(email, sessionToken);
   const id = cleanText_(threadId, 160);
   const record = allowed[id];
   if (!record) throw new Error('That conversation was not started through this portal.');
@@ -471,7 +526,7 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   const source = (thread.messages || []).find((message) => String(message.id || '') === cleanText_(messageId, 160));
   if (!source) throw new Error('The selected message could not be found.');
   const sourceFrom = addressFrom_(header_(source, 'From'));
-  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email).has(sourceFrom)) {
+  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email, sessionToken).has(sourceFrom)) {
     recordAudit_(email, 'forward', id, source.id || '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
@@ -502,6 +557,7 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   recordAudit_(email, 'forward', sent.threadId, sent.id || '', 'success', '');
   recordMessageAudit_(email, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
   forwardAuditCopy_(email, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
+  clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
 
@@ -615,9 +671,10 @@ function forwardAuditCopy_(email, recipients, subject, body, sent, attachments) 
   }
 }
 
-function allowedThreadMap_(email) {
-  const allowedSenders = new Set(loggerCall_('listAllowedSenders', { email }));
-  const records = managedThreadRecords_(email, allowedSenders);
+function allowedThreadMap_(email, sessionToken) {
+  const snapshot = sessionToken ? portalMailboxSnapshot_(email, sessionToken) : null;
+  const allowedSenders = new Set(snapshot ? (snapshot.allowedSenders || []) : loggerCall_('listAllowedSenders', { email }));
+  const records = managedThreadRecords_(email, allowedSenders, snapshot ? snapshot.threads : null, false);
   return records.reduce((map, record) => { map[record.threadId] = record; return map; }, {});
 }
 
@@ -785,12 +842,12 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId, att
   const aid = cleanText_(attachmentId, 240);
   const name = cleanText_(attachmentName, 160);
   if (!id || !mid || (!aid && !name)) throw new Error('The received file could not be identified.');
-  const record = allowedThreadMap_(email)[id];
+  const record = allowedThreadMap_(email, sessionToken)[id];
   if (!record) throw new Error('That conversation was not started through this portal.');
   const message = Gmail.Users.Messages.get('me', mid, { format: 'full' });
   if (String(message.threadId || '') !== id) throw new Error('The received file does not belong to this conversation.');
   const sourceFrom = addressFrom_(header_(message, 'From'));
-  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email).has(sourceFrom)) throw new Error('This sender is not on the AllowedSenders list.');
+  if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email, sessionToken).has(sourceFrom)) throw new Error('This sender is not on the AllowedSenders list.');
   const subject = header_(message, 'Subject');
   const body = plainBody_(message.payload);
   const part = findAttachmentPart_(message.payload, aid, '') || findAttachmentPart_(message.payload, '', name);
@@ -818,7 +875,8 @@ function latestInbound_(thread, accountEmail) {
   }) || null;
 }
 
-function allowedSendersFor_(email) {
+function allowedSendersFor_(email, sessionToken) {
+  if (sessionToken) return new Set(portalMailboxSnapshot_(email, sessionToken).allowedSenders || []);
   return new Set(loggerCall_('listAllowedSenders', { email }));
 }
 

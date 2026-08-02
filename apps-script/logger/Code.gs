@@ -24,7 +24,8 @@ const LOGGER_SHEETS = {
 let loggerBookCache = null;
 const LOGGER_CACHE = {
   ready: 'teacher-mail-desk:logger-ready',
-  mailboxSeconds: 15,
+  mailboxSeconds: 60,
+  threadSeconds: 60,
   sessionSeconds: 600,
 };
 
@@ -250,7 +251,14 @@ function threadMessages_(payload) {
   authorize_(payload);
   const threadId = cleanText_(payload.threadId, 160);
   if (!threadId) throw new Error('A Gmail thread ID is required.');
-  return listMessageAudits_({ email, threadId, previewOnly: false });
+  const cacheKey = threadMessagesCacheKey_(email, threadId);
+  const cached = CacheService.getScriptCache().get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (ignored) {}
+  }
+  const messages = listMessageAudits_({ email, threadId, previewOnly: false });
+  try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(messages), LOGGER_CACHE.threadSeconds); } catch (ignored) {}
+  return messages;
 }
 
 function cacheMessages_(payload) {
@@ -260,6 +268,7 @@ function cacheMessages_(payload) {
   if (!items.length) return { recorded: true, count: 0 };
 
   const sheet = sheetFor_('messages');
+  const threadIds = {};
   const existing = {};
   readRows_(sheet).forEach((row) => {
     if (row.email === email && row.messageId && row.direction) {
@@ -279,6 +288,7 @@ function cacheMessages_(payload) {
     const body = cleanText_(item && item.body, 48000);
     const attachmentMetadata = cleanText_(item && item.attachmentMetadata, 4000);
     if (!threadId || !messageId) return;
+    threadIds[threadId] = true;
     if (hasFinancialPattern_(subject + '\n' + body + '\n' + attachmentMetadata)) return;
     const key = direction + ':' + messageId;
     if (existing[key] && existing[key].row) {
@@ -297,6 +307,7 @@ function cacheMessages_(payload) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.messages.headers.length).setValues(rows);
   }
   CacheService.getScriptCache().remove(mailboxCacheKey_(email));
+  Object.keys(threadIds).forEach((threadId) => CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, threadId)));
   return { recorded: true, count };
 }
 
@@ -431,6 +442,10 @@ function mailboxCacheKey_(email) {
   return 'teacher-mail-desk:mailbox:' + hash_(String(email || '').toLowerCase(), 'mailbox').slice(0, 48);
 }
 
+function threadMessagesCacheKey_(email, threadId) {
+  return 'teacher-mail-desk:thread:' + hash_(String(email || '').toLowerCase() + '|' + String(threadId || ''), 'thread').slice(0, 48);
+}
+
 function allowedSenderStatus_(value) {
   const status = String(value || '').trim().toLowerCase();
   return status !== 'inactive' && status !== 'disabled' && status !== 'removed' && status !== 'blocked';
@@ -480,6 +495,8 @@ function messageAudit_(payload) {
   } else {
     sheet.appendRow([values.timestamp, values.email, values.direction, values.action, values.threadId, values.messageId, values.from, values.to, values.subject, values.body, values.attachmentMetadata, values.result]);
   }
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
+  CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, threadId));
   return { recorded: true };
 }
 
