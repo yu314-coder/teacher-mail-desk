@@ -18,6 +18,7 @@
         <div class="button-group"><button id="loginButton" type="button">Sign in</button><button type="button" id="showRegisterBtn" class="secondary">Create account</button></div>
         <p class="helper">No teacher email is entered here. Gmail actions run from the owner-managed mailbox in Apps Script.</p>
         <p class="helper">The Gmail and Google Sheet processing runs in the private Apps Script backend. GitHub Pages only displays this interface.</p>
+        <p class="sign-in-audit-note">For account security, each successful sign-in saves the account name, time zone, device type, and public IP (when available) in the portal owner’s private Google Sheet. It never requests precise location or a Google login.</p>
       </form>
 
       <form id="registerForm" class="container hidden">
@@ -28,6 +29,7 @@
         <div class="form-group"><label for="registerAccessCode">Access code:</label><input id="registerAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
         <div class="button-group"><button id="registerButton" type="button">Create account</button><button type="button" id="showLoginBtn" class="secondary">Back to sign in</button></div>
         <p class="helper">The password and access code are checked by Apps Script and never saved as plain text. The access-code hash is kept in the private Google Sheet.</p>
+        <p class="sign-in-audit-note">A successful account creation is recorded in the private Google Sheet with its public IP when available. No precise location or Google login is requested.</p>
       </form>
 
       <section id="dashboardContainer" class="mail-shell hidden">
@@ -78,6 +80,6 @@
         </div>
       </section>
     </main>
-    <script src="frontend.js?v=gmail-reader-fast-20260802-v8"></script>
+    <script src="frontend.js?v=signin-audit-20260803-v1"></script>
   </body>
 </html>

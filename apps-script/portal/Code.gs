@@ -79,8 +79,8 @@ function bridgePost_(parameters) {
   let result;
   switch (method) {
     case 'getAppState': result = getAppState(); break;
-    case 'signUp': result = signUp(args[0], args[1], args[2]); break;
-    case 'signIn': result = signIn(args[0], args[1], args[2]); break;
+    case 'signUp': result = signUp(args[0], args[1], args[2], args[3]); break;
+    case 'signIn': result = signIn(args[0], args[1], args[2], args[3]); break;
     case 'signOut': result = signOut(args[0]); break;
     case 'setupMailbox': result = setupMailbox(args[0]); break;
     case 'listManagedThreads': result = listManagedThreads(args[0]); break;
@@ -144,20 +144,42 @@ function getAppState() {
   }
 }
 
-function signUp(accountName, password, accessCode) {
+function signUp(accountName, password, accessCode, clientMeta) {
   const email = backendEmail_();
   validateAccountInputs_(accountName, password, accessCode);
-  const result = loggerCall_('register', { email, accountName, password, accessCode });
+  const result = loggerCall_('register', { email, accountName, password, accessCode, clientMeta: signInClientMeta_(clientMeta) });
   return { ok: true, sessionToken: result.sessionToken, expiresAt: result.expiresAt };
 }
 
-function signIn(accountName, password, accessCode) {
+function signIn(accountName, password, accessCode, clientMeta) {
   const email = backendEmail_();
   if (!String(accountName || '').trim()) throw new Error('Enter the account name.');
   if (!password || String(password).length < 6) throw new Error('Use a password with at least 6 characters.');
   if (!accessCode || String(accessCode).length < 4) throw new Error('Enter the administrator access code.');
-  const result = loggerCall_('login', { email, accountName: String(accountName), password: String(password), accessCode: String(accessCode) });
+  const result = loggerCall_('login', {
+    email,
+    accountName: String(accountName),
+    password: String(password),
+    accessCode: String(accessCode),
+    clientMeta: signInClientMeta_(clientMeta),
+  });
   return { ok: true, sessionToken: result.sessionToken, expiresAt: result.expiresAt };
+}
+
+/**
+ * The browser supplies a coarse sign-in audit record. These fields are capped
+ * here before they ever reach the logger. This portal never asks for browser
+ * GPS location or a teacher's Google account.
+ */
+function signInClientMeta_(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    publicIp: cleanText_(input.publicIp, 64),
+    timeZone: cleanText_(input.timeZone, 80),
+    locale: cleanText_(input.locale, 80),
+    deviceType: cleanText_(input.deviceType, 24),
+    ipStatus: cleanText_(input.ipStatus, 40),
+  };
 }
 
 function signOut(sessionToken) {

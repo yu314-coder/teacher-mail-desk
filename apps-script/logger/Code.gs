@@ -18,6 +18,7 @@ const LOGGER_SHEETS = {
   audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason', 'accountName'] },
   messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result', 'accountName'] },
   authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt', 'accountName'] },
+  signInLog: { name: 'SignInLog', headers: ['timestamp', 'accountName', 'backendEmail', 'event', 'publicIp', 'timeZone', 'locale', 'deviceType', 'ipStatus'] },
   security: { name: 'Security', headers: ['setting', 'value'] },
 };
 
@@ -134,6 +135,7 @@ function register_(payload) {
   const sheet = sheetFor_('users');
   sheet.appendRow([accountName, email, salt, passwordHash, 'active', new Date(), '']);
   sheetFor_('audit').appendRow([new Date(), email, 'register', '', '', 'success', '', accountName]);
+  recordSignIn_(email, accountName, 'register', payload.clientMeta);
   return createSession_(email, accountName);
 }
 
@@ -165,7 +167,43 @@ function login_(payload) {
   clearLoginFailures_(email, accountName);
   updateRow_(sheetFor_('users'), user.row, user.headers, { lastLoginAt: new Date() });
   sheetFor_('audit').appendRow([new Date(), email, 'login', '', '', 'success', '', accountName]);
+  recordSignIn_(email, accountName, 'sign_in', payload.clientMeta);
   return createSession_(email, accountName);
+}
+
+/**
+ * Record successful account access in the private Sheet. The public IP is a
+ * browser-provided audit value, so it is intentionally treated as optional.
+ * No password, access code, Google token, GPS position, or browser history is
+ * ever included in this log.
+ */
+function recordSignIn_(email, accountName, eventName, clientMeta) {
+  const meta = safeSignInMeta_(clientMeta);
+  sheetFor_('signInLog').appendRow([
+    new Date(),
+    accountName,
+    email,
+    cleanText_(eventName, 24),
+    meta.publicIp,
+    meta.timeZone,
+    meta.locale,
+    meta.deviceType,
+    meta.ipStatus,
+  ]);
+}
+
+function safeSignInMeta_(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const publicIp = cleanText_(input.publicIp, 64);
+  return {
+    // Accept only an IPv4/IPv6-looking value. The browser lookup is optional
+    // and this avoids saving arbitrary injected text in the audit Sheet.
+    publicIp: /^[0-9a-f:.]{3,64}$/i.test(publicIp) ? publicIp : '',
+    timeZone: cleanText_(input.timeZone, 80),
+    locale: cleanText_(input.locale, 80),
+    deviceType: cleanText_(input.deviceType, 24),
+    ipStatus: cleanText_(input.ipStatus, 40) || 'not_available',
+  };
 }
 
 function verifyAccessCode_(accessCode) {

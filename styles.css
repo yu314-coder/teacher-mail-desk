@@ -185,6 +185,17 @@ button.secondary:disabled:active {
   text-align: center;
 }
 
+.sign-in-audit-note {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border-left: 3px solid #667eea;
+  border-radius: 7px;
+  color: #4c5662;
+  background: #f4f6ff;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
 .alert {
   padding: 16px 20px;
   margin: 0 auto 15px;

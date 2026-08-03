@@ -78,6 +78,58 @@ let mailboxLoadInFlight = false;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
+function localSignInAuditMeta() {
+  let timeZone = '';
+  try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (ignored) {}
+  const agent = String(navigator.userAgent || '').toLowerCase();
+  const deviceType = /ipad|tablet/.test(agent)
+    ? 'tablet'
+    : /mobi|iphone|ipod|android/.test(agent)
+      ? 'mobile'
+      : 'desktop';
+  return {
+    publicIp: '',
+    timeZone: String(timeZone).slice(0, 80),
+    locale: String(navigator.language || '').slice(0, 80),
+    deviceType,
+    ipStatus: 'not_available',
+  };
+}
+
+function isPublicIp(value) {
+  return /^[0-9a-f:.]{3,64}$/i.test(String(value || '').trim());
+}
+
+async function collectSignInAuditMeta() {
+  const meta = localSignInAuditMeta();
+  if (!globalThis.fetch) return meta;
+  const controller = globalThis.AbortController ? new AbortController() : null;
+  const timeout = controller ? window.setTimeout(() => controller.abort(), 1500) : 0;
+  try {
+    const response = await fetch('https://api64.ipify.org?format=json', {
+      cache: 'no-store',
+      signal: controller ? controller.signal : undefined,
+    });
+    const value = await response.json();
+    if (value && isPublicIp(value.ip)) {
+      meta.publicIp = String(value.ip).trim();
+      meta.ipStatus = 'recorded';
+    } else {
+      meta.ipStatus = 'invalid_response';
+    }
+  } catch (ignored) {
+    meta.ipStatus = 'unavailable';
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+  }
+  return meta;
+}
+
+// Begin the optional lookup while the sign-in form is being displayed. It
+// normally completes before the teacher clicks Sign in and never blocks an
+// otherwise valid sign-in for more than 1.5 seconds.
+const signInAuditMetaPromise = collectSignInAuditMeta();
+
 function showAlert(message, type = 'error') {
   const container = $('alertContainer');
   container.textContent = '';
@@ -510,7 +562,12 @@ function submitAccount(form, method, accountId, passwordId, codeId, buttonLabel)
   const button = $(method === 'signIn' ? 'loginButton' : 'registerButton');
   setBusy(button, true, buttonLabel);
   showAlert('');
-  bridgeRpc(method, [$(accountId).value, $(passwordId).value, $(codeId).value]).then((result) => {
+  signInAuditMetaPromise.then((clientMeta) => bridgeRpc(method, [
+    $(accountId).value,
+    $(passwordId).value,
+    $(codeId).value,
+    clientMeta,
+  ])).then((result) => {
     portalSessionToken = result && result.sessionToken ? result.sessionToken : '';
     if (!portalSessionToken) throw new Error('The secure portal did not return a session.');
     setBusy(button, false);
