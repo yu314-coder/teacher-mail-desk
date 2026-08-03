@@ -171,6 +171,7 @@ function signOut(sessionToken) {
 
 function listManagedThreads(sessionToken) {
   const email = backendEmail_();
+  if (flushPendingManagedThreads_(email)) clearPortalMailboxCache_(email, sessionToken);
   const snapshot = portalMailboxSnapshot_(email, sessionToken);
   let allowedSenders = new Set(snapshot.allowedSenders || []);
   if (!allowedSenders.size) {
@@ -206,6 +207,7 @@ function listManagedThreads(sessionToken) {
 
 function syncManagedInbox(sessionToken) {
   const email = backendEmail_();
+  if (flushPendingManagedThreads_(email)) clearPortalMailboxCache_(email, sessionToken);
   const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const auditByThreadId = {};
@@ -469,7 +471,7 @@ function sendMessage(sessionToken, to, subject, body, attachments) {
   if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
   ensureManagedLabel_();
   addManagedLabel_(sent.threadId);
-  loggerCall_('recordThread', { email, threadId: sent.threadId, recipient: recipients.join(', ') });
+  recordManagedThread_(email, sent.threadId, recipients.join(', '));
   try { loggerCall_('ensureAllowedSenders', { email, sessionToken, senders: recipients }); } catch (ignored) {}
   recordAudit_(email, 'send', sent.threadId, sent.id || '', 'success', '');
   recordMessageAudit_(email, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
@@ -511,7 +513,7 @@ function replyToThread(sessionToken, threadId, body, attachments) {
     threadId: id,
   }, 'me');
   addManagedLabel_(id);
-  loggerCall_('recordThread', { email, threadId: id, recipient: record.recipient });
+  recordManagedThread_(email, id, record.recipient);
   recordAudit_(email, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
   recordMessageAudit_(email, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, [recipient], replySubject, cleanBody, sent, safeAttachments);
@@ -557,7 +559,7 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
   ensureManagedLabel_();
   addManagedLabel_(sent.threadId);
-  loggerCall_('recordThread', { email, threadId: sent.threadId, recipient: recipients.join(', ') });
+  recordManagedThread_(email, sent.threadId, recipients.join(', '));
   recordAudit_(email, 'forward', sent.threadId, sent.id || '', 'success', '');
   recordMessageAudit_(email, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
   forwardAuditCopy_(email, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
@@ -607,9 +609,16 @@ function loggerCall_(operation, payload) {
   const secret = String(props.getProperty('LOGGER_SECRET') || '').trim();
   if (!url || !secret) throw new Error('The portal is not connected to its private Sheet logger yet.');
   const body = Object.assign({}, payload || {}, { operation, secret });
-  const retryable = ['mailboxSnapshot', 'authorize', 'listThreads', 'listAllowedSenders'].indexOf(operation) >= 0;
+  // These operations are idempotent. Google occasionally returns a short HTML
+  // interstitial after the logger has already finished the write, so retrying
+  // prevents a successful Gmail send from being reported as failed.
+  const retryable = [
+    'mailboxSnapshot', 'authorize', 'listThreads', 'listAllowedSenders',
+    'recordThread', 'recordThreads', 'ensureAllowedSenders', 'cacheMessages', 'messageAudit',
+  ].indexOf(operation) >= 0;
+  const maxAttempts = retryable ? 3 : 1;
   let lastError = null;
-  for (let attempt = 0; attempt < (retryable ? 2 : 1); attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const response = UrlFetchApp.fetch(url, {
         method: 'post',
@@ -618,15 +627,83 @@ function loggerCall_(operation, payload) {
         muteHttpExceptions: true,
       });
       let decoded;
-      try { decoded = JSON.parse(response.getContentText()); } catch (error) { throw new Error('The private Sheet logger returned an invalid response.'); }
+      const responseText = String(response.getContentText() || '').replace(/^\uFEFF/, '').trim();
+      try { decoded = JSON.parse(responseText); } catch (error) { throw new Error('The private Sheet logger returned an invalid response.'); }
       if (response.getResponseCode() >= 300 || !decoded.ok) throw new Error(decoded.error || 'The private Sheet logger rejected the request.');
       return decoded.result;
     } catch (error) {
       lastError = error;
-      if (attempt + 1 < (retryable ? 2 : 1)) Utilities.sleep(150);
+      if (attempt + 1 < maxAttempts) Utilities.sleep(250 * (attempt + 1));
     }
   }
   throw lastError || new Error('The private Sheet logger did not respond.');
+}
+
+function recordManagedThread_(email, threadId, recipient) {
+  try {
+    loggerCall_('recordThread', { email, threadId, recipient });
+  } catch (ignored) {
+    // Gmail has already sent the message. Keep a small, private retry record
+    // in the portal owner's script properties so a later mailbox refresh can
+    // complete the Sheet write without showing a false failed-send error.
+    queuePendingManagedThread_(email, threadId, recipient);
+  }
+}
+
+function queuePendingManagedThread_(email, threadId, recipient) {
+  const key = pendingManagedThreadsKey_(email);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(3000);
+    const props = PropertiesService.getScriptProperties();
+    let pending = [];
+    try { pending = JSON.parse(String(props.getProperty(key) || '[]')); } catch (ignored) {}
+    pending = Array.isArray(pending) ? pending : [];
+    const item = { threadId: cleanText_(threadId, 160), recipient: cleanText_(recipient, 500), queuedAt: new Date().toISOString() };
+    if (!item.threadId || !item.recipient) return;
+    const index = pending.findIndex((entry) => entry && entry.threadId === item.threadId);
+    if (index >= 0) pending[index] = item;
+    else pending.push(item);
+    props.setProperty(key, JSON.stringify(pending.slice(-20)));
+  } catch (ignored) {
+    // A second future mailbox request will still make the normal logger call.
+  } finally {
+    try { lock.releaseLock(); } catch (ignored) {}
+  }
+}
+
+function flushPendingManagedThreads_(email) {
+  const key = pendingManagedThreadsKey_(email);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(3000);
+    const props = PropertiesService.getScriptProperties();
+    let pending = [];
+    try { pending = JSON.parse(String(props.getProperty(key) || '[]')); } catch (ignored) {}
+    pending = Array.isArray(pending) ? pending : [];
+    if (!pending.length) return false;
+    const remaining = [];
+    let wrote = false;
+    pending.forEach((item) => {
+      try {
+        loggerCall_('recordThread', { email, threadId: item.threadId, recipient: item.recipient });
+        wrote = true;
+      } catch (ignored) {
+        remaining.push(item);
+      }
+    });
+    if (remaining.length) props.setProperty(key, JSON.stringify(remaining.slice(-20)));
+    else props.deleteProperty(key);
+    return wrote;
+  } catch (ignored) {
+    return false;
+  } finally {
+    try { lock.releaseLock(); } catch (ignored) {}
+  }
+}
+
+function pendingManagedThreadsKey_(email) {
+  return 'PENDING_MANAGED_THREADS_' + String(email || '').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 180);
 }
 
 function recordAudit_(email, action, threadId, messageId, result, reason) {
