@@ -166,7 +166,7 @@ function showDashboard() {
   $('loginForm').classList.add('hidden');
   $('registerForm').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
-  $('statusLabel').textContent = 'Loading managed conversations…';
+  $('statusLabel').textContent = 'Loading conversations…';
   loadThreads();
 }
 
@@ -272,10 +272,10 @@ function renderThreads() {
     const empty = document.createElement('div');
     empty.className = 'empty mailbox-empty';
     empty.textContent = activeFolder === 'inbox'
-      ? 'Your inbox is empty. Approved senders will appear here when they email the managed Gmail account.'
+      ? 'Your inbox is empty. Approved senders will appear here when they email the Gmail account.'
       : activeFolder === 'sent'
         ? 'No sent conversations yet. Use Compose to send the first message.'
-        : 'No mail yet. Use Compose to start a managed conversation.';
+        : 'No mail yet. Use Compose to start a conversation.';
     list.appendChild(empty);
     $('noThread').classList.remove('hidden');
     return;
@@ -288,7 +288,7 @@ function renderThreads() {
     button.addEventListener('click', () => selectThread(thread.threadId));
     const sender = document.createElement('strong');
     sender.className = 'thread-sender';
-    sender.textContent = thread.sender || thread.recipient || 'Managed conversation';
+  sender.textContent = thread.sender || thread.recipient || 'Conversation';
     const subject = document.createElement('span');
     subject.className = 'thread-subject';
     subject.textContent = thread.subject || 'Private conversation';
@@ -360,7 +360,7 @@ function renderThread(thread) {
   $('noThread').classList.add('hidden');
   $('threadPanel').classList.remove('hidden');
   $('threadSubject').textContent = thread.subject || 'Private conversation';
-  $('threadRecipient').textContent = (thread.messageCount || (thread.messages || []).length || 1) + ' message' + ((thread.messageCount || (thread.messages || []).length || 1) === 1 ? '' : 's') + ' · Conversation with ' + (thread.recipient || 'managed recipient');
+  $('threadRecipient').textContent = (thread.messageCount || (thread.messages || []).length || 1) + ' message' + ((thread.messageCount || (thread.messages || []).length || 1) === 1 ? '' : 's') + ' · Conversation with ' + (thread.recipient || 'recipient');
   const list = $('messageList');
   list.textContent = '';
   (thread.messages || []).forEach((message) => {
@@ -405,7 +405,7 @@ function renderThread(thread) {
       const details = document.createElement('div');
       details.className = 'message-details hidden';
       appendDetailRow(details, 'From', message.fromName && message.from ? message.fromName + ' <' + message.from + '>' : (message.from || 'Sender hidden'));
-      appendDetailRow(details, 'To', message.to || thread.recipient || 'Managed mailbox');
+      appendDetailRow(details, 'To', message.to || thread.recipient || 'Mailbox');
       appendDetailRow(details, 'Cc', message.cc);
       appendDetailRow(details, 'Reply-To', message.replyTo);
       appendDetailRow(details, 'Date', formatMessageDate(message.date) || message.date);
@@ -436,7 +436,7 @@ function renderThread(thread) {
       } else if (message.attachment) {
         const attachmentNote = document.createElement('div');
         attachmentNote.className = 'message-attachment-note';
-        attachmentNote.textContent = 'Attachment present. File contents stay in the managed Gmail account.';
+        attachmentNote.textContent = 'Attachment present. File contents stay in the Gmail account.';
         card.appendChild(attachmentNote);
       }
       const actions = document.createElement('div');
@@ -465,7 +465,7 @@ function renderThread(thread) {
   if (!(thread.messages || []).length) {
     const pending = document.createElement('div');
     pending.className = 'conversation-loading';
-    pending.textContent = thread.needsRemoteCheck ? 'Checking the managed Gmail conversation for received messages…' : 'No visible message content is available.';
+    pending.textContent = thread.needsRemoteCheck ? 'Checking the Gmail conversation for received messages…' : 'No visible message content is available.';
     list.appendChild(pending);
   }
 }
@@ -522,7 +522,7 @@ function selectThread(id) {
 function loadThreads() {
   if (mailboxLoadInFlight) return;
   mailboxLoadInFlight = true;
-  $('statusLabel').textContent = 'Loading managed conversations…';
+  $('statusLabel').textContent = 'Loading conversations…';
   authenticatedRpc('listManagedThreads', []).then((result) => {
     showAlert('');
     currentThreads = uniqueThreads(result && result.threads ? result.threads : []);
@@ -565,7 +565,7 @@ function closeThread() {
 }
 
 function authenticatedRpc(method, args) {
-  if (!portalSessionToken) return Promise.reject(new Error('Sign in to the teacher portal first.'));
+  if (!portalSessionToken) return Promise.reject(new Error('Sign in first.'));
   return bridgeRpc(method, [portalSessionToken].concat(args || []));
 }
 
@@ -641,7 +641,7 @@ $('composeForm').addEventListener('submit', async (event) => {
   setBusy(button, true, 'Sending…');
   try {
     const attachments = await readAttachments($('composeFiles'));
-    handleSend(form, 'sendMessage', [$('composeTo').value, $('composeSubject').value, $('composeBody').value, attachments], 'Message sent. It is now a managed conversation.', 'Sending…');
+    handleSend(form, 'sendMessage', [$('composeTo').value, $('composeSubject').value, $('composeBody').value, attachments], 'Message sent. It is now a conversation.', 'Sending…');
   } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('replyForm').addEventListener('submit', async (event) => {
@@ -651,7 +651,7 @@ $('replyForm').addEventListener('submit', async (event) => {
   setBusy(button, true, 'Sending reply…');
   try {
     const attachments = await readAttachments($('replyFiles'));
-    handleSend(form, 'replyToThread', [selectedThreadId, $('replyBody').value, attachments], 'Reply sent through the managed Gmail backend.', 'Sending reply…');
+  handleSend(form, 'replyToThread', [selectedThreadId, $('replyBody').value, attachments], 'Reply sent through Gmail.', 'Sending reply…');
   } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('forwardForm').addEventListener('submit', async (event) => {
@@ -661,7 +661,7 @@ $('forwardForm').addEventListener('submit', async (event) => {
   setBusy(button, true, 'Forwarding…');
   try {
     const attachments = await readAttachments($('forwardFiles'));
-    handleSend(form, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through the managed Gmail backend.', 'Forwarding…');
+  handleSend(form, 'forwardMessage', [$('forwardThreadId').value, $('forwardMessageId').value, $('forwardTo').value, $('forwardNote').value, attachments], 'Forward sent through Gmail.', 'Forwarding…');
   } catch (error) { setBusy(button, false); showAlert(messageText(error)); }
 });
 $('composeOpenButton').addEventListener('click', openCompose);

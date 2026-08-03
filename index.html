@@ -11,12 +11,12 @@
     <main>
       <form id="loginForm" class="container">
         <h2>Sign in</h2>
-        <p class="muted">Open the managed teacher mailbox from this GitHub Pages screen.</p>
+        <p class="muted">Open the mailbox from this GitHub Pages screen.</p>
         <div class="form-group"><label for="loginAccountName">Account name:</label><input id="loginAccountName" type="text" autocomplete="username" required /></div>
-        <div class="form-group"><label for="loginPassword">Portal password:</label><input id="loginPassword" type="password" autocomplete="current-password" minlength="6" required /></div>
+        <div class="form-group"><label for="loginPassword">Password:</label><input id="loginPassword" type="password" autocomplete="current-password" minlength="6" required /></div>
         <div class="form-group"><label for="loginAccessCode">Access code:</label><input id="loginAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
         <div class="button-group"><button id="loginButton" type="button">Sign in</button><button type="button" id="showRegisterBtn" class="secondary">Create account</button></div>
-        <p class="helper">No teacher email is entered here. Gmail actions run from the owner-managed mailbox in Apps Script.</p>
+        <p class="helper">No teacher email is entered here. Gmail actions run from the owner’s mailbox in Apps Script.</p>
         <p class="helper">The Gmail and Google Sheet processing runs in the private Apps Script backend. GitHub Pages only displays this interface.</p>
         <p class="sign-in-audit-note">For account security, each successful sign-in saves the account name, time zone, device type, and public IP (when available) in the portal owner’s private Google Sheet. It never requests precise location or a Google login.</p>
       </form>
@@ -25,7 +25,7 @@
         <h2>Create account</h2>
         <p class="muted">Create the teacher’s portal account using the administrator access code.</p>
         <div class="form-group"><label for="registerAccountName">Account name:</label><input id="registerAccountName" type="text" autocomplete="username" required /></div>
-        <div class="form-group"><label for="registerPassword">Portal password:</label><input id="registerPassword" type="password" autocomplete="new-password" minlength="6" required /></div>
+        <div class="form-group"><label for="registerPassword">Password:</label><input id="registerPassword" type="password" autocomplete="new-password" minlength="6" required /></div>
         <div class="form-group"><label for="registerAccessCode">Access code:</label><input id="registerAccessCode" type="password" autocomplete="one-time-code" minlength="4" required /></div>
         <div class="button-group"><button id="registerButton" type="button">Create account</button><button type="button" id="showLoginBtn" class="secondary">Back to sign in</button></div>
         <p class="helper">The password and access code are checked by Apps Script and never saved as plain text. The access-code hash is kept in the private Google Sheet.</p>
@@ -49,7 +49,7 @@
           </aside>
 
           <section class="mail-main">
-            <div class="mail-toolbar"><div><p class="eyebrow">MAILBOX</p><h1 id="folderTitle">All mail</h1></div><span class="mail-boundary">Managed by private Google backend</span></div>
+            <div class="mail-toolbar"><div><p class="eyebrow">MAILBOX</p><h1 id="folderTitle">All mail</h1></div><span class="mail-boundary">Private Google backend</span></div>
             <form id="composeForm" class="compose-card hidden">
               <div class="compose-heading"><div><p class="eyebrow">NEW MESSAGE</p><h2>Compose</h2></div><button id="composeCloseButton" class="icon-button" type="button" aria-label="Close compose">×</button></div>
               <div class="two-col"><div><label for="composeTo">To</label><input id="composeTo" type="text" placeholder="person@example.com" required /></div><div><label for="composeSubject">Subject</label><input id="composeSubject" type="text" maxlength="180" required /></div></div>
@@ -80,6 +80,6 @@
         </div>
       </section>
     </main>
-    <script src="frontend.js?v=signin-audit-20260803-v2"></script>
+    <script src="frontend.js?v=ui-copy-20260803-v3"></script>
   </body>
 </html>
