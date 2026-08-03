@@ -124,7 +124,9 @@ function register_(payload) {
   if (password.length < 6) throw new Error('Use a password with at least 6 characters.');
   if (accessCode.length < 4) throw new Error('The access code is invalid.');
   if (findUserByAccountName_(accountName)) throw new Error('This account name is already registered.');
-  if (findUserByEmail_(email)) throw new Error('This Google account is already registered.');
+  // All portal users intentionally share the owner-managed Gmail account.
+  // The account name is the unique portal identity; do not reject a new
+  // teacher credential just because it uses the same private backend email.
   verifyAccessCode_(accessCode);
 
   const salt = Utilities.getUuid();
