@@ -171,7 +171,7 @@ function signOut(sessionToken) {
 
 function listManagedThreads(sessionToken) {
   const email = backendEmail_();
-  if (flushPendingManagedThreads_(email)) clearPortalMailboxCache_(email, sessionToken);
+  if (flushPendingManagedThreads_(email, sessionToken)) clearPortalMailboxCache_(email, sessionToken);
   const snapshot = portalMailboxSnapshot_(email, sessionToken);
   let allowedSenders = new Set(snapshot.allowedSenders || []);
   if (!allowedSenders.size) {
@@ -196,7 +196,7 @@ function listManagedThreads(sessionToken) {
       threadAudits.push(audit);
     }
   });
-  const allowed = managedThreadRecords_(email, allowedSenders, snapshot.threads || [], false).slice(0, PORTAL.maxThreads);
+  const allowed = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], false).slice(0, PORTAL.maxThreads);
   // Keep the first mailbox request light. Gmail only loads the full message
   // payload after the teacher opens a conversation, just like Gmail's list
   // view does. This avoids one slow full-thread API request per row.
@@ -207,7 +207,7 @@ function listManagedThreads(sessionToken) {
 
 function syncManagedInbox(sessionToken) {
   const email = backendEmail_();
-  if (flushPendingManagedThreads_(email)) clearPortalMailboxCache_(email, sessionToken);
+  if (flushPendingManagedThreads_(email, sessionToken)) clearPortalMailboxCache_(email, sessionToken);
   const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
   const auditByThreadId = {};
@@ -216,7 +216,7 @@ function syncManagedInbox(sessionToken) {
     const list = auditByThreadId[String(audit.threadId)] || (auditByThreadId[String(audit.threadId)] = []);
     list.push(audit);
   });
-  const records = managedThreadRecords_(email, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+  const records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
   const threads = records.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
   threads.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
   return { ok: true, threads, allowedSenders: Array.from(allowedSenders).sort() };
@@ -471,11 +471,11 @@ function sendMessage(sessionToken, to, subject, body, attachments) {
   if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
   ensureManagedLabel_();
   addManagedLabel_(sent.threadId);
-  recordManagedThread_(email, sent.threadId, recipients.join(', '));
+  recordManagedThread_(email, sessionToken, sent.threadId, recipients.join(', '));
   try { loggerCall_('ensureAllowedSenders', { email, sessionToken, senders: recipients }); } catch (ignored) {}
-  recordAudit_(email, 'send', sent.threadId, sent.id || '', 'success', '');
-  recordMessageAudit_(email, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
-  forwardAuditCopy_(email, recipients, cleanSubject, cleanBody, sent, safeAttachments);
+  recordAudit_(email, sessionToken, 'send', sent.threadId, sent.id || '', 'success', '');
+  recordMessageAudit_(email, sessionToken, 'sent', 'send', sent.threadId, sent.id || '', email, recipients.join(', '), cleanSubject, cleanBody, safeAttachments);
+  forwardAuditCopy_(email, sessionToken, recipients, cleanSubject, cleanBody, sent, safeAttachments);
   clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
@@ -494,7 +494,7 @@ function replyToThread(sessionToken, threadId, body, attachments) {
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
   const inbound = latestInbound_(thread, email);
   if (inbound && !allowedSendersFor_(email, sessionToken).has(addressFrom_(header_(inbound, 'From')))) {
-    recordAudit_(email, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
+    recordAudit_(email, sessionToken, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
   const recipient = inbound
@@ -513,10 +513,10 @@ function replyToThread(sessionToken, threadId, body, attachments) {
     threadId: id,
   }, 'me');
   addManagedLabel_(id);
-  recordManagedThread_(email, id, record.recipient);
-  recordAudit_(email, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
-  recordMessageAudit_(email, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
-  forwardAuditCopy_(email, [recipient], replySubject, cleanBody, sent, safeAttachments);
+  recordManagedThread_(email, sessionToken, id, record.recipient);
+  recordAudit_(email, sessionToken, 'reply', id, sent && sent.id ? sent.id : '', 'success', '');
+  recordMessageAudit_(email, sessionToken, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
+  forwardAuditCopy_(email, sessionToken, [recipient], replySubject, cleanBody, sent, safeAttachments);
   clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
@@ -533,7 +533,7 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   if (!source) throw new Error('The selected message could not be found.');
   const sourceFrom = addressFrom_(header_(source, 'From'));
   if (sourceFrom && sourceFrom !== email && !allowedSendersFor_(email, sessionToken).has(sourceFrom)) {
-    recordAudit_(email, 'forward', id, source.id || '', 'blocked', 'Inbound sender is not on AllowedSenders.');
+    recordAudit_(email, sessionToken, 'forward', id, source.id || '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
   const sourceSubject = header_(source, 'Subject') || 'Teacher Mail Desk conversation';
@@ -559,10 +559,10 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
   if (!sent || !sent.threadId) throw new Error('Gmail did not return a thread ID.');
   ensureManagedLabel_();
   addManagedLabel_(sent.threadId);
-  recordManagedThread_(email, sent.threadId, recipients.join(', '));
-  recordAudit_(email, 'forward', sent.threadId, sent.id || '', 'success', '');
-  recordMessageAudit_(email, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
-  forwardAuditCopy_(email, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
+  recordManagedThread_(email, sessionToken, sent.threadId, recipients.join(', '));
+  recordAudit_(email, sessionToken, 'forward', sent.threadId, sent.id || '', 'success', '');
+  recordMessageAudit_(email, sessionToken, 'sent', 'forward', sent.threadId, sent.id || '', email, recipients.join(', '), forwardSubject, forwardedBody, safeAttachments);
+  forwardAuditCopy_(email, sessionToken, recipients, forwardSubject, forwardedBody, sent, safeAttachments);
   clearPortalMailboxCache_(email, sessionToken);
   return { ok: true, sent: true };
 }
@@ -639,19 +639,19 @@ function loggerCall_(operation, payload) {
   throw lastError || new Error('The private Sheet logger did not respond.');
 }
 
-function recordManagedThread_(email, threadId, recipient) {
+function recordManagedThread_(email, sessionToken, threadId, recipient) {
   try {
-    loggerCall_('recordThread', { email, threadId, recipient });
+    loggerCall_('recordThread', { email, sessionToken, threadId, recipient });
   } catch (ignored) {
     // Gmail has already sent the message. Keep a small, private retry record
     // in the portal owner's script properties so a later mailbox refresh can
     // complete the Sheet write without showing a false failed-send error.
-    queuePendingManagedThread_(email, threadId, recipient);
+    queuePendingManagedThread_(email, sessionToken, threadId, recipient);
   }
 }
 
-function queuePendingManagedThread_(email, threadId, recipient) {
-  const key = pendingManagedThreadsKey_(email);
+function queuePendingManagedThread_(email, sessionToken, threadId, recipient) {
+  const key = pendingManagedThreadsKey_(email, sessionToken);
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(3000);
@@ -672,8 +672,8 @@ function queuePendingManagedThread_(email, threadId, recipient) {
   }
 }
 
-function flushPendingManagedThreads_(email) {
-  const key = pendingManagedThreadsKey_(email);
+function flushPendingManagedThreads_(email, sessionToken) {
+  const key = pendingManagedThreadsKey_(email, sessionToken);
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(3000);
@@ -686,7 +686,7 @@ function flushPendingManagedThreads_(email) {
     let wrote = false;
     pending.forEach((item) => {
       try {
-        loggerCall_('recordThread', { email, threadId: item.threadId, recipient: item.recipient });
+        loggerCall_('recordThread', { email, sessionToken, threadId: item.threadId, recipient: item.recipient });
         wrote = true;
       } catch (ignored) {
         remaining.push(item);
@@ -702,20 +702,20 @@ function flushPendingManagedThreads_(email) {
   }
 }
 
-function pendingManagedThreadsKey_(email) {
-  return 'PENDING_MANAGED_THREADS_' + String(email || '').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 180);
+function pendingManagedThreadsKey_(email, sessionToken) {
+  return 'PENDING_MANAGED_THREADS_' + portalMailboxCacheKey_(email, sessionToken).slice(-48);
 }
 
-function recordAudit_(email, action, threadId, messageId, result, reason) {
+function recordAudit_(email, sessionToken, action, threadId, messageId, result, reason) {
   try {
-    loggerCall_('audit', { email, action, threadId, messageId, result, reason });
+    loggerCall_('audit', { email, sessionToken, action, threadId, messageId, result, reason });
   } catch (ignored) {
     // Do not turn a successful Gmail operation into a duplicate send because
     // an audit write was temporarily unavailable.
   }
 }
 
-function recordMessageAudit_(email, direction, action, threadId, messageId, from, to, subject, body, attachments) {
+function recordMessageAudit_(email, sessionToken, direction, action, threadId, messageId, from, to, subject, body, attachments) {
   if (!messageId) return;
   const attachmentMetadata = (attachments || [])
     .map((file) => ({ name: file.name, mimeType: file.mimeType, size: file.size }))
@@ -723,14 +723,14 @@ function recordMessageAudit_(email, direction, action, threadId, messageId, from
     .join('\n');
   try {
     loggerCall_('messageAudit', {
-      email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result: 'success',
+      email, sessionToken, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result: 'success',
     });
   } catch (ignored) {
     // Message delivery/read access remains independent of a temporary audit-write outage.
   }
 }
 
-function forwardAuditCopy_(email, recipients, subject, body, sent, attachments) {
+function forwardAuditCopy_(email, sessionToken, recipients, subject, body, sent, attachments) {
   const attachmentSummary = attachments && attachments.length
     ? attachments.map((file) => '- ' + file.name + ' (' + file.size + ' bytes)').join('\n')
     : '';
@@ -746,16 +746,16 @@ function forwardAuditCopy_(email, recipients, subject, body, sent, attachments) 
   ].join('\n');
   try {
     const forwarded = Gmail.Users.Messages.send({ raw: rawMessage_([PORTAL.auditForwardTo], auditSubject, auditBody) }, 'me');
-    recordAudit_(email, 'audit_forward', sent && sent.threadId ? sent.threadId : '', forwarded && forwarded.id ? forwarded.id : '', 'success', PORTAL.auditForwardTo);
+    recordAudit_(email, sessionToken, 'audit_forward', sent && sent.threadId ? sent.threadId : '', forwarded && forwarded.id ? forwarded.id : '', 'success', PORTAL.auditForwardTo);
   } catch (error) {
-    recordAudit_(email, 'audit_forward', sent && sent.threadId ? sent.threadId : '', '', 'error', 'Audit copy failed');
+    recordAudit_(email, sessionToken, 'audit_forward', sent && sent.threadId ? sent.threadId : '', '', 'error', 'Audit copy failed');
   }
 }
 
 function allowedThreadMap_(email, sessionToken) {
   const snapshot = sessionToken ? portalMailboxSnapshot_(email, sessionToken) : null;
-  const allowedSenders = new Set(snapshot ? (snapshot.allowedSenders || []) : loggerCall_('listAllowedSenders', { email }));
-  const records = managedThreadRecords_(email, allowedSenders, snapshot ? snapshot.threads : null, false);
+  const allowedSenders = new Set(snapshot ? (snapshot.allowedSenders || []) : loggerCall_('listAllowedSenders', { email, sessionToken }));
+  const records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot ? snapshot.threads : null, false);
   return records.reduce((map, record) => { map[record.threadId] = record; return map; }, {});
 }
 
@@ -958,14 +958,14 @@ function latestInbound_(thread, accountEmail) {
 
 function allowedSendersFor_(email, sessionToken) {
   if (sessionToken) return new Set(portalMailboxSnapshot_(email, sessionToken).allowedSenders || []);
-  return new Set(loggerCall_('listAllowedSenders', { email }));
+  throw new Error('Sign in to the teacher portal first.');
 }
 
-function managedThreadRecords_(email, allowedSenders, preloadedRecords, discoverInbound) {
+function managedThreadRecords_(email, sessionToken, allowedSenders, preloadedRecords, discoverInbound) {
   // The first outbound portal send is the hard boundary. Do not discover or
   // import historical Gmail conversations merely because an address is on the
   // AllowedSenders list; only replies in a recorded portal thread are shown.
-  const records = (preloadedRecords || loggerCall_('listThreads', { email }))
+  const records = (preloadedRecords || loggerCall_('listThreads', { email, sessionToken }))
     .filter((record) => record && record.threadId && String(record.recipient || '').trim())
     .slice(-100)
     .reverse();

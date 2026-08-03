@@ -12,12 +12,12 @@
 
 const LOGGER_SHEETS = {
   users: { name: 'Users', headers: ['accountName', 'email', 'salt', 'passwordHash', 'status', 'createdAt', 'lastLoginAt'] },
-  sessions: { name: 'Sessions', headers: ['sessionHash', 'email', 'createdAt', 'expiresAt', 'lastUsedAt', 'status'] },
-  threads: { name: 'AllowedThreads', headers: ['email', 'threadId', 'recipient', 'createdAt', 'lastSeenAt', 'status'] },
-  allowedSenders: { name: 'AllowedSenders', headers: ['email', 'status', 'addedAt', 'notes'] },
-  audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason'] },
-  messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result'] },
-  authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt'] },
+  sessions: { name: 'Sessions', headers: ['sessionHash', 'email', 'createdAt', 'expiresAt', 'lastUsedAt', 'status', 'accountName'] },
+  threads: { name: 'AllowedThreads', headers: ['email', 'threadId', 'recipient', 'createdAt', 'lastSeenAt', 'status', 'accountName'] },
+  allowedSenders: { name: 'AllowedSenders', headers: ['email', 'status', 'addedAt', 'notes', 'accountName'] },
+  audit: { name: 'Audit', headers: ['timestamp', 'email', 'action', 'threadId', 'messageId', 'result', 'reason', 'accountName'] },
+  messages: { name: 'Messages', headers: ['timestamp', 'email', 'direction', 'action', 'threadId', 'messageId', 'from', 'to', 'subject', 'body', 'attachmentMetadata', 'result', 'accountName'] },
+  authAttempts: { name: 'AuthAttempts', headers: ['email', 'windowStartedAt', 'failedCount', 'lockedUntil', 'lastAttemptAt', 'accountName'] },
   security: { name: 'Security', headers: ['setting', 'value'] },
 };
 
@@ -101,8 +101,8 @@ function handleOperation_(operation, payload) {
     case 'cacheMessages': return cacheMessages_(payload);
     case 'recordThread': return recordThread_(payload);
     case 'recordThreads': return recordThreads_(payload);
-    case 'listThreads': return listThreads_(payload);
-    case 'listAllowedSenders': return listAllowedSenders_(payload);
+    case 'listThreads': return listThreadsForSession_(payload);
+    case 'listAllowedSenders': return listAllowedSendersForSession_(payload);
     case 'ensureAllowedSenders': return ensureAllowedSenders_(payload);
     case 'audit': return recordAudit_(payload);
     case 'messageAudit': return messageAudit_(payload);
@@ -133,8 +133,8 @@ function register_(payload) {
   const passwordHash = hash_(password, salt);
   const sheet = sheetFor_('users');
   sheet.appendRow([accountName, email, salt, passwordHash, 'active', new Date(), '']);
-  sheetFor_('audit').appendRow([new Date(), email, 'register', '', '', 'success', '']);
-  return createSession_(email);
+  sheetFor_('audit').appendRow([new Date(), email, 'register', '', '', 'success', '', accountName]);
+  return createSession_(email, accountName);
 }
 
 function login_(payload) {
@@ -142,30 +142,30 @@ function login_(payload) {
   const email = normalizedEmail_(payload.email);
   const password = String(payload.password || '');
   const accessCode = String(payload.accessCode || '');
-  enforceLoginRateLimit_(email);
+  enforceLoginRateLimit_(email, accountName);
   const user = findUserByAccountName_(accountName);
   if (!user || user.email !== email || user.status !== 'active') {
-    recordLoginFailure_(email);
+    recordLoginFailure_(email, accountName);
     throw new Error('No active account exists for this account name and Google account.');
   }
   if (password.length < 6) {
-    recordLoginFailure_(email);
+    recordLoginFailure_(email, accountName);
     throw new Error('The password is incorrect.');
   }
   if (hash_(password, user.salt) !== user.passwordHash) {
-    recordLoginFailure_(email);
+    recordLoginFailure_(email, accountName);
     throw new Error('The password is incorrect.');
   }
   try {
     verifyAccessCode_(accessCode);
   } catch (error) {
-    recordLoginFailure_(email);
+    recordLoginFailure_(email, accountName);
     throw error;
   }
-  clearLoginFailures_(email);
+  clearLoginFailures_(email, accountName);
   updateRow_(sheetFor_('users'), user.row, user.headers, { lastLoginAt: new Date() });
-  sheetFor_('audit').appendRow([new Date(), email, 'login', '', '', 'success', '']);
-  return createSession_(email);
+  sheetFor_('audit').appendRow([new Date(), email, 'login', '', '', 'success', '', accountName]);
+  return createSession_(email, accountName);
 }
 
 function verifyAccessCode_(accessCode) {
@@ -178,16 +178,16 @@ function verifyAccessCode_(accessCode) {
   }
 }
 
-function enforceLoginRateLimit_(email) {
-  const row = readRows_(sheetFor_('authAttempts')).find((item) => item.email === email);
+function enforceLoginRateLimit_(email, accountName) {
+  const row = readRows_(sheetFor_('authAttempts')).find((item) => item.email === email && item.accountName === accountName);
   if (row && row.lockedUntil && new Date(row.lockedUntil).getTime() > Date.now()) {
     throw new Error('Too many failed sign-in attempts. Try again in 15 minutes.');
   }
 }
 
-function recordLoginFailure_(email) {
+function recordLoginFailure_(email, accountName) {
   const sheet = sheetFor_('authAttempts');
-  const existing = readRows_(sheet).find((item) => item.email === email);
+  const existing = readRows_(sheet).find((item) => item.email === email && item.accountName === accountName);
   const now = new Date();
   const sameWindow = Boolean(existing && existing.windowStartedAt && Date.now() - new Date(existing.windowStartedAt).getTime() < 15 * 60 * 1000);
   const windowStart = sameWindow
@@ -198,13 +198,13 @@ function recordLoginFailure_(email) {
   if (existing) {
     updateRow_(sheet, existing.row, existing.headers, { windowStartedAt: windowStart, failedCount: count, lockedUntil, lastAttemptAt: now });
   } else {
-    sheet.appendRow([email, windowStart, count, lockedUntil, now]);
+    sheet.appendRow([email, windowStart, count, lockedUntil, now, accountName]);
   }
 }
 
-function clearLoginFailures_(email) {
+function clearLoginFailures_(email, accountName) {
   const sheet = sheetFor_('authAttempts');
-  const existing = readRows_(sheet).find((item) => item.email === email);
+  const existing = readRows_(sheet).find((item) => item.email === email && item.accountName === accountName);
   if (existing) updateRow_(sheet, existing.row, existing.headers, { failedCount: 0, lockedUntil: '', lastAttemptAt: new Date() });
 }
 
@@ -214,7 +214,13 @@ function authorize_(payload) {
   if (token.length < 24) throw new Error('The portal session has expired.');
   const sessionHash = hash_(token, 'session');
   const sessionCacheKey = 'teacher-mail-desk:session:' + sessionHash.slice(0, 48);
-  if (CacheService.getScriptCache().get(sessionCacheKey) === email) return { authorized: true };
+  const cached = CacheService.getScriptCache().get(sessionCacheKey);
+  if (cached) {
+    try {
+      const scope = JSON.parse(cached);
+      if (scope.email === email && scope.accountName) return { authorized: true, email, accountName: normalizedAccountName_(scope.accountName) };
+    } catch (ignored) {}
+  }
   const sessionSheet = sheetFor_('sessions');
   const rows = readRows_(sessionSheet);
   const now = Date.now();
@@ -225,47 +231,51 @@ function authorize_(payload) {
       throw new Error('The portal session has expired.');
     }
     updateRow_(sessionSheet, row.row, row.headers, { lastUsedAt: new Date() });
-    CacheService.getScriptCache().put(sessionCacheKey, email, LOGGER_CACHE.sessionSeconds);
-    return { authorized: true };
+    const accountName = normalizedAccountName_(row.accountName || legacyAccountName_());
+    CacheService.getScriptCache().put(sessionCacheKey, JSON.stringify({ email, accountName }), LOGGER_CACHE.sessionSeconds);
+    return { authorized: true, email, accountName };
   }
   throw new Error('The portal session is not valid.');
 }
 
 function mailboxSnapshot_(payload) {
-  const email = normalizedEmail_(payload.email);
-  authorize_(payload);
-  const cacheKey = mailboxCacheKey_(email);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
+  const cacheKey = mailboxCacheKey_(email, accountName);
   const cached = CacheService.getScriptCache().get(cacheKey);
   if (cached) {
     try { return JSON.parse(cached); } catch (ignored) {}
   }
   const snapshot = {
-    threads: listThreads_({ email }),
-    allowedSenders: listAllowedSenders_({ email }),
-    messages: listMessageAudits_({ email, previewOnly: true }),
+    threads: listThreads_({ email, accountName }),
+    allowedSenders: listAllowedSenders_({ email, accountName }),
+    messages: listMessageAudits_({ email, accountName, previewOnly: true }),
   };
   try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(snapshot), LOGGER_CACHE.mailboxSeconds); } catch (ignored) {}
   return snapshot;
 }
 
 function threadMessages_(payload) {
-  const email = normalizedEmail_(payload.email);
-  authorize_(payload);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const threadId = cleanText_(payload.threadId, 160);
   if (!threadId) throw new Error('A Gmail thread ID is required.');
-  const cacheKey = threadMessagesCacheKey_(email, threadId);
+  const cacheKey = threadMessagesCacheKey_(email, accountName, threadId);
   const cached = CacheService.getScriptCache().get(cacheKey);
   if (cached) {
     try { return JSON.parse(cached); } catch (ignored) {}
   }
-  const messages = listMessageAudits_({ email, threadId, previewOnly: false });
+  const messages = listMessageAudits_({ email, accountName, threadId, previewOnly: false });
   try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(messages), LOGGER_CACHE.threadSeconds); } catch (ignored) {}
   return messages;
 }
 
 function cacheMessages_(payload) {
-  const email = normalizedEmail_(payload.email);
-  authorize_(payload);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const items = Array.isArray(payload.messages) ? payload.messages.slice(0, 50) : [];
   if (!items.length) return { recorded: true, count: 0 };
 
@@ -273,7 +283,7 @@ function cacheMessages_(payload) {
   const threadIds = {};
   const existing = {};
   readRows_(sheet).forEach((row) => {
-    if (row.email === email && row.messageId && row.direction) {
+    if (row.email === email && row.accountName === accountName && row.messageId && row.direction) {
       existing[String(row.direction) + ':' + String(row.messageId)] = row;
     }
   });
@@ -295,21 +305,21 @@ function cacheMessages_(payload) {
     const key = direction + ':' + messageId;
     if (existing[key] && existing[key].row) {
       updateRow_(sheet, existing[key].row, existing[key].headers, {
-        timestamp: new Date(), action, threadId, from, to, subject, body, attachmentMetadata, result: 'success',
+        timestamp: new Date(), action, threadId, from, to, subject, body, attachmentMetadata, result: 'success', accountName,
       });
       count += 1;
       return;
     }
     if (existing[key]) return;
     existing[key] = { row: 0 };
-    rows.push([new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, 'success']);
+    rows.push([new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, 'success', accountName]);
     count += 1;
   });
   if (rows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.messages.headers.length).setValues(rows);
   }
-  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
-  Object.keys(threadIds).forEach((threadId) => CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, threadId)));
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email, accountName));
+  Object.keys(threadIds).forEach((threadId) => CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, accountName, threadId)));
   return { recorded: true, count };
 }
 
@@ -325,30 +335,34 @@ function logout_(payload) {
 }
 
 function recordThread_(payload) {
-  const email = normalizedEmail_(payload.email);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const threadId = cleanText_(payload.threadId, 160);
   const recipient = cleanText_(payload.recipient, 500);
   if (!threadId) throw new Error('A Gmail thread ID is required.');
   const sheet = sheetFor_('threads');
-  const existing = readRows_(sheet).find((row) => row.email === email && row.threadId === threadId);
+  const existing = readRows_(sheet).find((row) => row.email === email && row.accountName === accountName && row.threadId === threadId);
   if (existing) {
-    updateRow_(sheet, existing.row, existing.headers, { lastSeenAt: new Date(), status: 'active' });
+    updateRow_(sheet, existing.row, existing.headers, { lastSeenAt: new Date(), status: 'active', accountName });
   } else {
-    sheet.appendRow([email, threadId, recipient, new Date(), new Date(), 'active']);
+    sheet.appendRow([email, threadId, recipient, new Date(), new Date(), 'active', accountName]);
   }
-  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email, accountName));
   return { recorded: true };
 }
 
 function recordThreads_(payload) {
-  const email = normalizedEmail_(payload.email);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const items = Array.isArray(payload.threads) ? payload.threads.slice(0, 50) : [];
   if (!items.length) return { recorded: true, count: 0 };
 
   const sheet = sheetFor_('threads');
   const existing = {};
   readRows_(sheet).forEach((row) => {
-    if (row.email === email && row.threadId) existing[String(row.threadId)] = true;
+    if (row.email === email && row.accountName === accountName && row.threadId) existing[String(row.threadId)] = true;
   });
   const rows = [];
   items.forEach((item) => {
@@ -356,23 +370,24 @@ function recordThreads_(payload) {
     const recipient = cleanText_(item && item.recipient, 500);
     if (!threadId || !recipient || existing[threadId]) return;
     existing[threadId] = true;
-    rows.push([email, threadId, recipient, new Date(), new Date(), 'active']);
+    rows.push([email, threadId, recipient, new Date(), new Date(), 'active', accountName]);
   });
   if (rows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, LOGGER_SHEETS.threads.headers.length).setValues(rows);
   }
-  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email, accountName));
   return { recorded: true, count: rows.length };
 }
 
 function listThreads_(payload) {
   const email = normalizedEmail_(payload.email);
+  const accountName = normalizedAccountName_(payload.accountName);
   const unique = {};
   readRows_(sheetFor_('threads'))
     // A conversation is managed only after this portal records its first
     // outbound send. Older inbound-only discovery rows stay in the Sheet for
     // audit history but are never returned to the teacher mailbox.
-    .filter((row) => row.email === email && row.status === 'active' && String(row.recipient || '').trim())
+    .filter((row) => row.email === email && row.accountName === accountName && row.status === 'active' && String(row.recipient || '').trim())
     .slice(-100)
     .reverse()
     .forEach((row) => {
@@ -383,12 +398,18 @@ function listThreads_(payload) {
   return Object.keys(unique).map((threadId) => unique[threadId]);
 }
 
+function listThreadsForSession_(payload) {
+  const scope = authorize_(payload);
+  return listThreads_({ email: scope.email, accountName: scope.accountName });
+}
+
 function listMessageAudits_(payload) {
   const email = normalizedEmail_(payload.email);
+  const accountName = normalizedAccountName_(payload.accountName);
   const threadId = cleanText_(payload.threadId, 160);
   const previewOnly = payload.previewOnly !== false;
   return readRows_(sheetFor_('messages'))
-    .filter((row) => row.email === email && row.result === 'success' && (!threadId || String(row.threadId) === threadId))
+    .filter((row) => row.email === email && row.accountName === accountName && row.result === 'success' && (!threadId || String(row.threadId) === threadId))
     .slice(-200)
     .reverse()
     .map((row) => ({
@@ -410,16 +431,23 @@ function listAllowedSenders_(payload) {
   // keeps the operation tied to the configured backend identity while the
   // actual allowlist remains manually editable in Google Sheets.
   normalizedEmail_(payload.email);
+  const accountName = normalizedAccountName_(payload.accountName);
   const seen = {};
   return readRows_(sheetFor_('allowedSenders'))
-    .filter((row) => allowedSenderStatus_(row.status))
+    .filter((row) => row.accountName === accountName && allowedSenderStatus_(row.status))
     .map((row) => senderEmail_(row.email))
     .filter((email) => email && !seen[email] && (seen[email] = true));
 }
 
+function listAllowedSendersForSession_(payload) {
+  const scope = authorize_(payload);
+  return listAllowedSenders_({ email: scope.email, accountName: scope.accountName });
+}
+
 function ensureAllowedSenders_(payload) {
-  const email = normalizedEmail_(payload.email);
-  if (payload.sessionToken) authorize_(payload);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const senders = Array.from(new Set((Array.isArray(payload.senders) ? payload.senders : []).map(senderEmail_).filter(Boolean)));
   if (senders.length) {
     const sheet = sheetFor_('allowedSenders');
@@ -427,25 +455,23 @@ function ensureAllowedSenders_(payload) {
     const existing = {};
     rows.forEach((row) => {
       const sender = senderEmail_(row.email);
-      if (sender) existing[sender] = row;
+      if (row.accountName === accountName && sender) existing[sender] = row;
     });
     senders.forEach((sender) => {
       if (existing[sender]) return;
-      sheet.appendRow([sender, 'active', new Date(), 'Auto-allowed after a portal send; delete or mark inactive to remove.']);
+      sheet.appendRow([sender, 'active', new Date(), 'Auto-allowed after a portal send; delete or mark inactive to remove.', accountName]);
     });
   }
-  if (payload.sessionToken) {
-    CacheService.getScriptCache().remove(mailboxCacheKey_(email));
-  }
-  return { allowedSenders: listAllowedSenders_({ email }) };
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email, accountName));
+  return { allowedSenders: listAllowedSenders_({ email, accountName }) };
 }
 
-function mailboxCacheKey_(email) {
-  return 'teacher-mail-desk:mailbox:' + hash_(String(email || '').toLowerCase(), 'mailbox').slice(0, 48);
+function mailboxCacheKey_(email, accountName) {
+  return 'teacher-mail-desk:mailbox:' + hash_(String(email || '').toLowerCase() + '|' + String(accountName || '').toLowerCase(), 'mailbox').slice(0, 48);
 }
 
-function threadMessagesCacheKey_(email, threadId) {
-  return 'teacher-mail-desk:thread:' + hash_(String(email || '').toLowerCase() + '|' + String(threadId || ''), 'thread').slice(0, 48);
+function threadMessagesCacheKey_(email, accountName, threadId) {
+  return 'teacher-mail-desk:thread:' + hash_(String(email || '').toLowerCase() + '|' + String(accountName || '').toLowerCase() + '|' + String(threadId || ''), 'thread').slice(0, 48);
 }
 
 function allowedSenderStatus_(value) {
@@ -461,19 +487,23 @@ function senderEmail_(value) {
 }
 
 function recordAudit_(payload) {
-  const email = normalizedEmail_(payload.email);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const action = cleanText_(payload.action, 80);
   const threadId = cleanText_(payload.threadId, 160);
   const messageId = cleanText_(payload.messageId, 160);
   const result = cleanText_(payload.result, 40);
   const reason = cleanText_(payload.reason, 160);
   if (!action || !result) throw new Error('Audit action and result are required.');
-  sheetFor_('audit').appendRow([new Date(), email, action, threadId, messageId, result, reason]);
+  sheetFor_('audit').appendRow([new Date(), email, action, threadId, messageId, result, reason, accountName]);
   return { recorded: true };
 }
 
 function messageAudit_(payload) {
-  const email = normalizedEmail_(payload.email);
+  const scope = authorize_(payload);
+  const email = scope.email;
+  const accountName = scope.accountName;
   const direction = cleanText_(payload.direction, 20);
   const action = cleanText_(payload.action, 40);
   const threadId = cleanText_(payload.threadId, 160);
@@ -490,28 +520,28 @@ function messageAudit_(payload) {
   }
 
   const sheet = sheetFor_('messages');
-  const existing = readRows_(sheet).find((row) => row.email === email && row.messageId === messageId && row.direction === direction);
-  const values = { timestamp: new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result };
+  const existing = readRows_(sheet).find((row) => row.email === email && row.accountName === accountName && row.messageId === messageId && row.direction === direction);
+  const values = { timestamp: new Date(), email, direction, action, threadId, messageId, from, to, subject, body, attachmentMetadata, result, accountName };
   if (existing) {
     updateRow_(sheet, existing.row, existing.headers, values);
   } else {
-    sheet.appendRow([values.timestamp, values.email, values.direction, values.action, values.threadId, values.messageId, values.from, values.to, values.subject, values.body, values.attachmentMetadata, values.result]);
+    sheet.appendRow([values.timestamp, values.email, values.direction, values.action, values.threadId, values.messageId, values.from, values.to, values.subject, values.body, values.attachmentMetadata, values.result, values.accountName]);
   }
-  CacheService.getScriptCache().remove(mailboxCacheKey_(email));
-  CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, threadId));
+  CacheService.getScriptCache().remove(mailboxCacheKey_(email, accountName));
+  CacheService.getScriptCache().remove(threadMessagesCacheKey_(email, accountName, threadId));
   return { recorded: true };
 }
 
-function createSession_(email) {
+function createSession_(email, accountName) {
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
   const now = new Date();
   const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const nowIso = now.toISOString();
   const expiresIso = expires.toISOString();
   const sessionHash = hash_(token, 'session');
-  sheetFor_('sessions').appendRow([sessionHash, email, nowIso, expiresIso, nowIso, 'active']);
-  CacheService.getScriptCache().put('teacher-mail-desk:session:' + sessionHash.slice(0, 48), email, LOGGER_CACHE.sessionSeconds);
-  return { authenticated: true, sessionToken: token, expiresAt: expires.toISOString() };
+  sheetFor_('sessions').appendRow([sessionHash, email, nowIso, expiresIso, nowIso, 'active', accountName]);
+  CacheService.getScriptCache().put('teacher-mail-desk:session:' + sessionHash.slice(0, 48), JSON.stringify({ email, accountName }), LOGGER_CACHE.sessionSeconds);
+  return { authenticated: true, accountName, sessionToken: token, expiresAt: expires.toISOString() };
 }
 
 function findUserByAccountName_(accountName) {
@@ -539,6 +569,7 @@ function sheetFor_(key) {
   let sheet = book.getSheetByName(config.name);
   if (!sheet) sheet = book.insertSheet(config.name);
   if (key === 'users') migrateUsersSchema_(sheet);
+  else if (['sessions', 'threads', 'allowedSenders', 'audit', 'messages', 'authAttempts'].indexOf(key) >= 0) migrateScopedSheetSchema_(sheet, key);
   else if (sheet.getLastRow() === 0) sheet.appendRow(config.headers);
   return sheet;
 }
@@ -559,6 +590,31 @@ function migrateUsersSchema_(sheet) {
     }
     sheet.getRange(1, 1, 1, targetHeaders.length).setValues([targetHeaders]);
   }
+}
+
+function migrateScopedSheetSchema_(sheet, key) {
+  const headers = LOGGER_SHEETS[key].headers;
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(headers);
+    return;
+  }
+  const lastColumn = Math.max(sheet.getLastColumn(), headers.length);
+  const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+  if (existingHeaders.indexOf('accountName') >= 0) return;
+  const column = Math.max(1, sheet.getLastColumn()) + 1;
+  sheet.insertColumnAfter(Math.max(1, sheet.getLastColumn()));
+  sheet.getRange(1, column).setValue('accountName');
+  const rowCount = sheet.getLastRow() - 1;
+  if (rowCount > 0) {
+    const legacyAccount = legacyAccountName_();
+    sheet.getRange(2, column, rowCount, 1).setValues(Array.from({ length: rowCount }, () => [legacyAccount]));
+  }
+}
+
+function legacyAccountName_() {
+  const users = readRows_(sheetFor_('users')).filter((row) => row && row.accountName && row.status === 'active');
+  const admin = users.find((row) => String(row.accountName).toLowerCase() === 'admin');
+  return String((admin || users[0] || {}).accountName || 'admin').toLowerCase();
 }
 
 function migrateSecurityProperties_() {
