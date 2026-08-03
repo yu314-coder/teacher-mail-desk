@@ -104,25 +104,36 @@ async function collectSignInAuditMeta() {
   const meta = localSignInAuditMeta();
   if (!globalThis.fetch) return meta;
   const controller = globalThis.AbortController ? new AbortController() : null;
-  const timeout = controller ? window.setTimeout(() => controller.abort(), 1500) : 0;
-  try {
-    const response = await fetch('https://api64.ipify.org?format=json', {
-      cache: 'no-store',
-      signal: controller ? controller.signal : undefined,
-    });
-    const value = await response.json();
-    if (value && isPublicIp(value.ip)) {
-      meta.publicIp = String(value.ip).trim();
-      meta.ipStatus = 'recorded';
-    } else {
-      meta.ipStatus = 'invalid_response';
+  let timeout = 0;
+  const lookup = (async () => {
+    try {
+      const response = await fetch('https://api64.ipify.org?format=json', {
+        cache: 'no-store',
+        signal: controller ? controller.signal : undefined,
+      });
+      const value = await response.json();
+      if (value && isPublicIp(value.ip)) {
+        meta.publicIp = String(value.ip).trim();
+        meta.ipStatus = 'recorded';
+      } else {
+        meta.ipStatus = 'invalid_response';
+      }
+    } catch (ignored) {
+      meta.ipStatus = 'unavailable';
     }
-  } catch (ignored) {
-    meta.ipStatus = 'unavailable';
+    return Object.assign({}, meta);
+  })();
+  const deadline = new Promise((resolve) => {
+    timeout = window.setTimeout(() => {
+      if (controller) controller.abort();
+      resolve(Object.assign({}, meta, { ipStatus: 'timeout' }));
+    }, 1500);
+  });
+  try {
+    return await Promise.race([lookup, deadline]);
   } finally {
     if (timeout) window.clearTimeout(timeout);
   }
-  return meta;
 }
 
 // Begin the optional lookup while the sign-in form is being displayed. It
