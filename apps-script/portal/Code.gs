@@ -294,28 +294,36 @@ function discoverManagedInboundThreads_(allowedSenders, records) {
   const senders = Object.keys(cutoffBySender);
   if (!senders.length) return [];
 
-  const earliest = Math.min.apply(null, senders.map((sender) => cutoffBySender[sender]));
-  const timeZone = Session.getScriptTimeZone() || 'Etc/UTC';
-  const after = Utilities.formatDate(new Date(earliest), timeZone, 'yyyy/MM/dd');
-  const query = '{' + senders.map((sender) => 'from:' + sender).join(' ') + '} after:' + after;
-  let listed;
-  try { listed = Gmail.Users.Threads.list('me', { q: query, maxResults: 50 }); } catch (ignored) { return []; }
-
   const existing = {};
   (records || []).forEach((record) => { if (record && record.threadId) existing[String(record.threadId)] = true; });
-  const discovered = [];
-  (listed && listed.threads || []).forEach((item) => {
-    if (discovered.length >= PORTAL.maxThreads || !item || !item.id || existing[String(item.id)]) return;
+  const candidateThreadIds = {};
+  const timeZone = Session.getScriptTimeZone() || 'Etc/UTC';
+  // GmailApp.search is deliberately used here instead of relying only on the
+  // Advanced Gmail Threads.list response. Some automatic replies are placed
+  // in a new thread, and GmailApp.search consistently returns those Inbox
+  // threads even when their subject/thread headers do not match the sent mail.
+  senders.forEach((sender) => {
+    const after = Utilities.formatDate(new Date(cutoffBySender[sender]), timeZone, 'yyyy/MM/dd');
     try {
-      const thread = Gmail.Users.Threads.get('me', String(item.id), { format: 'full' });
+      GmailApp.search('from:' + sender + ' after:' + after, 0, 50).forEach((thread) => {
+        if (thread && thread.getId()) candidateThreadIds[String(thread.getId())] = true;
+      });
+    } catch (ignored) {}
+  });
+
+  const discovered = [];
+  Object.keys(candidateThreadIds).forEach((threadId) => {
+    if (discovered.length >= PORTAL.maxThreads || existing[threadId]) return;
+    try {
+      const thread = Gmail.Users.Threads.get('me', threadId, { format: 'full' });
       const candidate = (thread.messages || [])
         .map((message) => ({ message, sender: addressFrom_(header_(message, 'From')), at: Number(message.internalDate || 0) || dateValue_(header_(message, 'Date')) }))
         .filter((entry) => allowedSenders.has(entry.sender) && entry.at > (cutoffBySender[entry.sender] || 0))
         .sort((a, b) => b.at - a.at)[0];
       if (!candidate) return;
-      existing[String(item.id)] = true;
+      existing[threadId] = true;
       discovered.push({
-        threadId: String(item.id),
+        threadId,
         recipient: candidate.sender,
         createdAt: new Date(candidate.at).toISOString(),
         lastSeenAt: new Date(candidate.at).toISOString(),
