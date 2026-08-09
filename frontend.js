@@ -75,6 +75,7 @@ let selectedThreadId = '';
 let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
+let inboxSyncInFlight = false;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
@@ -532,6 +533,7 @@ function loadThreads() {
     renderAllowedSenders();
     renderThreads();
     if (selectedThreadId) selectThread(selectedThreadId);
+    refreshInboxInBackground();
   }).catch((error) => {
     $('statusLabel').textContent = '';
     const list = $('threadList');
@@ -544,6 +546,23 @@ function loadThreads() {
     showAlert(messageText(error));
   }).finally(() => {
     mailboxLoadInFlight = false;
+  });
+}
+
+function refreshInboxInBackground() {
+  if (inboxSyncInFlight || !portalSessionToken) return;
+  inboxSyncInFlight = true;
+  authenticatedRpc('syncManagedInbox', []).then((result) => {
+    if (!result) return;
+    currentThreads = uniqueThreads(result.threads || []);
+    currentAllowedSenders = result.allowedSenders || [];
+    updateFolderCounts();
+    renderAllowedSenders();
+    renderThreads();
+  }).catch(() => {
+    // The fast Sheet-backed list remains usable if Gmail is temporarily slow.
+  }).finally(() => {
+    inboxSyncInFlight = false;
   });
 }
 

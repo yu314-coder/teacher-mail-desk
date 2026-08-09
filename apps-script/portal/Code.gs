@@ -232,16 +232,36 @@ function syncManagedInbox(sessionToken) {
   if (flushPendingManagedThreads_(email, sessionToken)) clearPortalMailboxCache_(email, sessionToken);
   const snapshot = portalMailboxSnapshot_(email, sessionToken);
   const allowedSenders = new Set(snapshot.allowedSenders || []);
+  const records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+
+  // Refresh only threads that were already started by this portal. Gmail does
+  // not push replies into the Sheet, so inspect each recorded thread and cache
+  // newly received, allowlisted messages for the next fast mailbox read.
+  records.forEach((record) => {
+    try {
+      const gmailThread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
+      const view = threadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_((snapshot.messages || []).filter((audit) => String(audit.threadId || '') === String(record.threadId))));
+      if (view && (view.messages || []).some((message) => message && !message.mine)) {
+        cacheReceivedThread_(email, sessionToken, view);
+      }
+    } catch (ignored) {
+      // One deleted or temporarily unavailable Gmail thread must not prevent
+      // the rest of the inbox from refreshing.
+    }
+  });
+
+  const refreshed = portalMailboxSnapshot_(email, sessionToken);
   const auditByThreadId = {};
-  (snapshot.messages || []).forEach((audit) => {
+  (refreshed.messages || []).forEach((audit) => {
     if (!audit || !audit.threadId) return;
     const list = auditByThreadId[String(audit.threadId)] || (auditByThreadId[String(audit.threadId)] = []);
     list.push(audit);
   });
-  const records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
-  const threads = records.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
+  const refreshedAllowedSenders = new Set(refreshed.allowedSenders || allowedSenders);
+  const refreshedRecords = managedThreadRecords_(email, sessionToken, refreshedAllowedSenders, refreshed.threads || [], true).slice(0, PORTAL.maxThreads);
+  const threads = refreshedRecords.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
   threads.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
-  return { ok: true, threads, allowedSenders: Array.from(allowedSenders).sort() };
+  return { ok: true, threads, allowedSenders: Array.from(refreshedAllowedSenders).sort() };
 }
 
 function getManagedThread(sessionToken, threadId) {
