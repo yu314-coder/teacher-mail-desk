@@ -76,6 +76,7 @@ let selectedMessageId = '';
 let portalSessionToken = '';
 let mailboxLoadInFlight = false;
 let inboxSyncInFlight = false;
+let inboxRefreshTimer = 0;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
 
@@ -168,10 +169,12 @@ function showDashboard() {
   $('registerForm').classList.add('hidden');
   $('dashboardContainer').classList.remove('hidden');
   $('statusLabel').textContent = 'Loading conversations…';
+  startInboxRefresh();
   loadThreads();
 }
 
 function hideDashboard() {
+  stopInboxRefresh();
   document.body.classList.remove('mailbox-open');
   $('dashboardContainer').classList.add('hidden');
   $('loginForm').classList.remove('hidden');
@@ -564,6 +567,19 @@ function refreshInboxInBackground() {
   }).finally(() => {
     inboxSyncInFlight = false;
   });
+}
+
+function startInboxRefresh() {
+  stopInboxRefresh();
+  inboxRefreshTimer = window.setInterval(() => {
+    if (portalSessionToken && !document.hidden) refreshInboxInBackground();
+  }, 45000);
+}
+
+function stopInboxRefresh() {
+  if (!inboxRefreshTimer) return;
+  window.clearInterval(inboxRefreshTimer);
+  inboxRefreshTimer = 0;
 }
 
 function openCompose() {

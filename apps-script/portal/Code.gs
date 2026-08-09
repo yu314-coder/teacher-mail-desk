@@ -230,9 +230,26 @@ function listManagedThreads(sessionToken) {
 function syncManagedInbox(sessionToken) {
   const email = backendEmail_();
   if (flushPendingManagedThreads_(email, sessionToken)) clearPortalMailboxCache_(email, sessionToken);
-  const snapshot = portalMailboxSnapshot_(email, sessionToken);
-  const allowedSenders = new Set(snapshot.allowedSenders || []);
-  const records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+  let snapshot = portalMailboxSnapshot_(email, sessionToken);
+  let allowedSenders = new Set(snapshot.allowedSenders || []);
+  let records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+
+  // An allowed sender may start a new Gmail thread instead of replying in the
+  // original thread. Discover only messages sent after the first portal send
+  // to that sender, then record the new thread under this portal account.
+  const discovered = discoverManagedInboundThreads_(allowedSenders, records);
+  if (discovered.length) {
+    try {
+      loggerCall_('recordThreads', { email, sessionToken, threads: discovered });
+      clearPortalMailboxCache_(email, sessionToken);
+      snapshot = portalMailboxSnapshot_(email, sessionToken);
+      allowedSenders = new Set(snapshot.allowedSenders || allowedSenders);
+      records = managedThreadRecords_(email, sessionToken, allowedSenders, snapshot.threads || [], true).slice(0, PORTAL.maxThreads);
+    } catch (ignored) {
+      // A temporary logger outage must not prevent existing conversations from
+      // refreshing; the next background pass will retry discovery.
+    }
+  }
 
   // Refresh only threads that were already started by this portal. Gmail does
   // not push replies into the Sheet, so inspect each recorded thread and cache
@@ -262,6 +279,52 @@ function syncManagedInbox(sessionToken) {
   const threads = refreshedRecords.map((record) => threadSummary_(record, email, auditByThreadId[String(record.threadId)] || []));
   threads.sort((a, b) => dateValue_(b.lastMessageAt) - dateValue_(a.lastMessageAt));
   return { ok: true, threads, allowedSenders: Array.from(refreshedAllowedSenders).sort() };
+}
+
+function discoverManagedInboundThreads_(allowedSenders, records) {
+  const cutoffBySender = {};
+  (records || []).forEach((record) => {
+    const createdAt = dateValue_(record && record.createdAt);
+    if (!createdAt) return;
+    extractEmails_(record.recipient).forEach((sender) => {
+      if (!allowedSenders.has(sender)) return;
+      cutoffBySender[sender] = cutoffBySender[sender] ? Math.min(cutoffBySender[sender], createdAt) : createdAt;
+    });
+  });
+  const senders = Object.keys(cutoffBySender);
+  if (!senders.length) return [];
+
+  const earliest = Math.min.apply(null, senders.map((sender) => cutoffBySender[sender]));
+  const timeZone = Session.getScriptTimeZone() || 'Etc/UTC';
+  const after = Utilities.formatDate(new Date(earliest), timeZone, 'yyyy/MM/dd');
+  const query = '{' + senders.map((sender) => 'from:' + sender).join(' ') + '} after:' + after;
+  let listed;
+  try { listed = Gmail.Users.Threads.list('me', { q: query, maxResults: 50 }); } catch (ignored) { return []; }
+
+  const existing = {};
+  (records || []).forEach((record) => { if (record && record.threadId) existing[String(record.threadId)] = true; });
+  const discovered = [];
+  (listed && listed.threads || []).forEach((item) => {
+    if (discovered.length >= PORTAL.maxThreads || !item || !item.id || existing[String(item.id)]) return;
+    try {
+      const thread = Gmail.Users.Threads.get('me', String(item.id), { format: 'full' });
+      const candidate = (thread.messages || [])
+        .map((message) => ({ message, sender: addressFrom_(header_(message, 'From')), at: Number(message.internalDate || 0) || dateValue_(header_(message, 'Date')) }))
+        .filter((entry) => allowedSenders.has(entry.sender) && entry.at > (cutoffBySender[entry.sender] || 0))
+        .sort((a, b) => b.at - a.at)[0];
+      if (!candidate) return;
+      existing[String(item.id)] = true;
+      discovered.push({
+        threadId: String(item.id),
+        recipient: candidate.sender,
+        createdAt: new Date(candidate.at).toISOString(),
+        lastSeenAt: new Date(candidate.at).toISOString(),
+      });
+    } catch (ignored) {
+      // Ignore one unavailable or malformed thread and continue with the list.
+    }
+  });
+  return discovered;
 }
 
 function getManagedThread(sessionToken, threadId) {
