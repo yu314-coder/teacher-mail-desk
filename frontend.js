@@ -361,9 +361,7 @@ function openReceivedAttachment(threadId, messageId, file, button) {
       || /^text\//i.test(mimeType)
       || mimeType.toLowerCase() === 'application/pdf'
       || mimeType.toLowerCase() === 'application/json';
-    if (canPreview && previewWindow && !previewWindow.closed) {
-      previewWindow.document.title = result.name || file.name || 'Received file';
-      previewWindow.location.replace(url);
+    if (canPreview && renderAttachmentPreview(previewWindow, url, mimeType, result.name || file.name || 'Received file', bytes)) {
       window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       showAlert('File opened in a new tab.', 'success');
       return;
@@ -400,6 +398,48 @@ function downloadReceivedAttachment(threadId, messageId, file, button) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showAlert('File downloaded.', 'success');
   }).catch((error) => showAlert(messageText(error))).finally(() => setBusy(button, false));
+}
+
+function renderAttachmentPreview(previewWindow, url, mimeType, name, bytes) {
+  if (!previewWindow || previewWindow.closed) return false;
+  try {
+    // Navigate first so the real blob URL is not left as about:blank. Safari
+    // can occasionally keep the popup on about:blank, so render a same-origin
+    // fallback inside it when navigation does not take effect.
+    previewWindow.location.href = url;
+    if (previewWindow.location.href !== 'about:blank') {
+      previewWindow.focus();
+      return true;
+    }
+  } catch (ignored) {}
+  try {
+    const documentRef = previewWindow.document;
+    documentRef.title = name || 'Received file';
+    documentRef.body.textContent = '';
+    documentRef.body.style.margin = '0';
+    documentRef.body.style.background = '#111827';
+    let element;
+    if (/^image\//i.test(mimeType)) {
+      element = documentRef.createElement('img');
+      element.src = url;
+      element.alt = name || 'Received image';
+      element.style.cssText = 'display:block;max-width:100%;max-height:100vh;margin:auto;object-fit:contain;';
+    } else if (mimeType.toLowerCase() === 'application/pdf') {
+      element = documentRef.createElement('iframe');
+      element.src = url;
+      element.title = name || 'Received PDF';
+      element.style.cssText = 'display:block;width:100vw;height:100vh;border:0;background:#fff;';
+    } else {
+      element = documentRef.createElement('pre');
+      element.textContent = new TextDecoder().decode(bytes);
+      element.style.cssText = 'box-sizing:border-box;margin:0;padding:20px;min-height:100vh;color:#f9fafb;white-space:pre-wrap;overflow:auto;font:14px/1.5 ui-monospace,monospace;';
+    }
+    documentRef.body.appendChild(element);
+    previewWindow.focus();
+    return true;
+  } catch (ignored) {
+    return false;
+  }
 }
 
 function renderThread(thread) {
