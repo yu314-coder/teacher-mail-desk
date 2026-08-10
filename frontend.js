@@ -598,6 +598,10 @@ function loadThreads() {
 function refreshInboxInBackground() {
   if (inboxSyncInFlight || !portalSessionToken) return;
   inboxSyncInFlight = true;
+  const selectedBeforeSync = selectedThreadId;
+  const previousSelected = selectedBeforeSync
+    ? currentThreads.find((thread) => thread.threadId === selectedBeforeSync)
+    : null;
   authenticatedRpc('syncManagedInbox', []).then((result) => {
     if (!result) return;
     currentThreads = uniqueThreads(result.threads || []);
@@ -605,6 +609,12 @@ function refreshInboxInBackground() {
     updateFolderCounts();
     renderAllowedSenders();
     renderThreads();
+    const refreshedSelected = selectedBeforeSync
+      ? currentThreads.find((thread) => thread.threadId === selectedBeforeSync)
+      : null;
+    const changedWhileOpen = previousSelected && refreshedSelected
+      && String(previousSelected.lastMessageAt || '') !== String(refreshedSelected.lastMessageAt || '');
+    if (changedWhileOpen && !$('replyBody').value.trim()) selectThread(selectedBeforeSync);
   }).catch(() => {
     // The fast Sheet-backed list remains usable if Gmail is temporarily slow.
   }).finally(() => {

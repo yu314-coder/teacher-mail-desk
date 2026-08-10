@@ -257,10 +257,11 @@ function syncManagedInbox(sessionToken) {
   records.forEach((record) => {
     try {
       const gmailThread = Gmail.Users.Threads.get('me', record.threadId, { format: 'full' });
-      const view = threadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_((snapshot.messages || []).filter((audit) => String(audit.threadId || '') === String(record.threadId))));
-      if (view && (view.messages || []).some((message) => message && !message.mine)) {
-        cacheReceivedThread_(email, sessionToken, view);
-      }
+      const audits = (snapshot.messages || []).filter((audit) => String(audit.threadId || '') === String(record.threadId));
+      const view = threadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(audits));
+      // Cache both directions. This picks up replies sent manually from the
+      // owner's Gmail app while keeping them scoped to this managed thread.
+      cacheManagedThreadMessages_(email, sessionToken, view, audits);
     } catch (ignored) {
       // One deleted or temporarily unavailable Gmail thread must not prevent
       // the rest of the inbox from refreshing.
@@ -352,18 +353,22 @@ function getManagedThread(sessionToken, threadId) {
     try { audits = loggerCall_('threadMessages', { email, sessionToken, threadId: id }); } catch (ignored) {}
   }
   const hasBlankReceivedAudit = audits.some((audit) => String(audit.direction || '').toLowerCase() === 'received' && !String(audit.body || '').trim());
+  const hasAttachmentAudit = audits.some((audit) => {
+    const metadata = String(audit.attachmentMetadata || '').trim();
+    return Boolean(metadata && metadata !== '[]');
+  });
   // Portal-sent messages are already privacy-filtered and stored in the
   // private Sheet logger. Use that copy immediately instead of waiting on a
   // second Gmail payload request just to open a sent conversation.
-  if (record && audits.length && !hasBlankReceivedAudit) return { ok: true, thread: threadViewFromAudits_(email, record, audits, allowedSenders) };
+  if (record && audits.length && !hasBlankReceivedAudit && !hasAttachmentAudit) return { ok: true, thread: threadViewFromAudits_(email, record, audits, allowedSenders) };
   // A discovered Inbox thread has no portal audit row by design. Fetch its
   // complete Gmail payload once now so opening it shows the actual sender,
   // headers, body, and safe attachment metadata immediately. The previous
   // path returned a placeholder and then made a second slow GmailApp call.
-  if (record && (record.inbound || hasBlankReceivedAudit)) {
+  if (record && (record.inbound || hasBlankReceivedAudit || hasAttachmentAudit)) {
     const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
     const view = threadView_(thread, email, record, allowedSenders, groupAuditsByMessage_(audits));
-    cacheReceivedThread_(email, sessionToken, view);
+    cacheManagedThreadMessages_(email, sessionToken, view, audits);
     return { ok: true, thread: view };
   }
   if (record) {
@@ -392,12 +397,16 @@ function getManagedThreadRemote(sessionToken, threadId) {
   return { ok: true, thread: gmailAppThreadView_(gmailThread, email, record, allowedSenders, groupAuditsByMessage_(audits)) };
 }
 
-function cacheReceivedThread_(email, sessionToken, thread) {
+function cacheManagedThreadMessages_(email, sessionToken, thread, existingAudits) {
+  const existing = {};
+  (existingAudits || []).forEach((audit) => {
+    if (audit && audit.messageId) existing[String(audit.messageId)] = true;
+  });
   const messages = (thread && thread.messages || [])
-    .filter((message) => message && !message.mine && !message.blocked && message.id)
+    .filter((message) => message && !message.blocked && message.id && !existing[String(message.id)])
     .map((message) => ({
-      direction: 'received',
-      action: 'cache',
+      direction: message.mine ? 'sent' : 'received',
+      action: message.mine ? 'gmail_sync' : 'cache',
       threadId: thread.threadId,
       messageId: message.id,
       from: message.from,
@@ -409,6 +418,10 @@ function cacheReceivedThread_(email, sessionToken, thread) {
   if (!messages.length) return;
   try { loggerCall_('cacheMessages', { email, sessionToken, messages }); } catch (ignored) {}
   clearPortalMailboxCache_(email, sessionToken);
+}
+
+function cacheReceivedThread_(email, sessionToken, thread) {
+  cacheManagedThreadMessages_(email, sessionToken, thread, []);
 }
 
 function portalMailboxSnapshot_(email, sessionToken) {
@@ -520,7 +533,7 @@ function gmailAppMessageView_(message, accountEmail, audit) {
   const subject = String(message.getSubject() || String(audit && audit.subject || ''));
   const from = String(message.getFrom() || String(audit && audit.from || ''));
   const body = String(message.getPlainBody() || String(audit && audit.body || ''));
-  const attachments = message.getAttachments().map((file) => ({
+  const attachments = message.getAttachments({ includeInlineImages: false }).map((file) => ({
     name: safeDisplayText_(file.getName(), 160),
     mimeType: safeDisplayText_(file.getContentType(), 120),
     size: Number(file.getSize() || 0),
@@ -529,7 +542,7 @@ function gmailAppMessageView_(message, accountEmail, audit) {
   return {
     id: String(message.getId() || ''),
     blocked,
-    attachment: attachments.length > 0 || Boolean(audit && audit.attachmentMetadata),
+    attachment: attachments.length > 0,
     date: message.getDate() instanceof Date ? message.getDate().toISOString() : String(audit && audit.timestamp || ''),
     from: blocked ? '' : addressFrom_(from) || from,
     fromName: blocked ? '' : safeDisplayText_(displayNameFrom_(from), 180),
@@ -948,7 +961,7 @@ function messageView_(message, accountEmail, audit) {
     return {
       id: message.id,
       blocked: true,
-      attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
+      attachment: hasAttachment || attachments.length > 0,
       date: date || '',
       from: '',
       fromName: '',
@@ -964,7 +977,7 @@ function messageView_(message, accountEmail, audit) {
   return {
     id: message.id,
     blocked: false,
-    attachment: hasAttachment || Boolean(audit && audit.attachmentMetadata),
+    attachment: hasAttachment || attachments.length > 0,
     date: date || '',
     from: addressFrom_(from) || (from || ''),
     fromName: safeDisplayText_(displayNameFrom_(from), 180),
@@ -987,7 +1000,7 @@ function attachmentSummaries_(payload, audit, messageId) {
   const result = [];
   function collect(part) {
     if (!part) return;
-    if (part.filename) result.push({
+    if (part.filename && !isInlinePart_(part)) result.push({
       name: safeDisplayText_(part.filename, 160),
       mimeType: safeDisplayText_(part.mimeType, 120),
       size: Number(part.body && part.body.size || 0),
@@ -997,7 +1010,11 @@ function attachmentSummaries_(payload, audit, messageId) {
     (part.parts || []).forEach(collect);
   }
   collect(payload);
-  if (!result.length && audit && audit.attachmentMetadata) {
+  // A real Gmail payload is authoritative. Only use Sheet metadata for
+  // synthetic audit-only messages; this prevents old cached inline logos from
+  // reappearing as downloadable attachments.
+  const syntheticPayload = !payload || (!payload.mimeType && !(payload.parts || []).length && !payload.filename);
+  if (!result.length && syntheticPayload && audit && audit.attachmentMetadata) {
     const addParsed = (parsed) => {
       const files = Array.isArray(parsed) ? parsed : [parsed];
       files.forEach((file) => {
@@ -1020,6 +1037,17 @@ function attachmentSummaries_(payload, audit, messageId) {
     }
   }
   return result.slice(0, 20);
+}
+
+function isInlinePart_(part) {
+  const headers = (part && part.headers) || [];
+  const getHeader = (name) => {
+    const match = headers.find((header) => String(header && header.name || '').toLowerCase() === name.toLowerCase());
+    return String(match && match.value || '');
+  };
+  const disposition = getHeader('Content-Disposition');
+  const contentId = getHeader('Content-ID');
+  return /^inline\b/i.test(disposition) || Boolean(contentId.trim());
 }
 
 function findAttachmentPart_(payload, attachmentId, name) {
@@ -1055,6 +1083,7 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId, att
   const body = plainBody_(message.payload);
   const part = findAttachmentPart_(message.payload, aid, '') || findAttachmentPart_(message.payload, '', name);
   if (!part) throw new Error('This received file is no longer available.');
+  if (isInlinePart_(part)) throw new Error('This image is part of the email design, not a downloadable attachment.');
   if (hasFinancialPattern_(subject + '\n' + body + '\n' + part.filename + '\n' + part.mimeType)) {
     throw new Error('This file is hidden by the privacy filter.');
   }
@@ -1199,7 +1228,7 @@ function plainBody_(payload) {
 
 function hasAttachment_(payload) {
   if (!payload) return false;
-  if (payload.filename) return true;
+  if (payload.filename && !isInlinePart_(payload)) return true;
   return (payload.parts || []).some((part) => hasAttachment_(part));
 }
 
