@@ -377,10 +377,24 @@ function decodeAttachmentResult(result, fallbackFile) {
   if (!/^[A-Za-z0-9+/]+$/.test(normalized) || normalized.length % 4 === 1) {
     throw new Error('Gmail returned an unreadable attachment payload.');
   }
-  const encoded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
-  const binary = atob(encoded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  const bytes = new Uint8Array(Math.floor(normalized.length * 3 / 4));
+  let outputIndex = 0;
+  for (let index = 0; index < padded.length; index += 4) {
+    const first = alphabet.indexOf(padded[index]);
+    const second = alphabet.indexOf(padded[index + 1]);
+    const thirdChar = padded[index + 2];
+    const fourthChar = padded[index + 3];
+    const third = thirdChar === '=' ? 0 : alphabet.indexOf(thirdChar);
+    const fourth = fourthChar === '=' ? 0 : alphabet.indexOf(fourthChar);
+    if (first < 0 || second < 0 || third < 0 || fourth < 0) {
+      throw new Error('Gmail returned an unreadable attachment payload.');
+    }
+    if (outputIndex < bytes.length) bytes[outputIndex++] = (first << 2) | (second >> 4);
+    if (thirdChar !== '=' && outputIndex < bytes.length) bytes[outputIndex++] = ((second & 15) << 4) | (third >> 2);
+    if (fourthChar !== '=' && outputIndex < bytes.length) bytes[outputIndex++] = ((third & 3) << 6) | fourth;
+  }
   return {
     bytes,
     name: String(result && result.name || fallbackFile && fallbackFile.name || 'received-file'),
