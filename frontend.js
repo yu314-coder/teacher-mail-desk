@@ -79,6 +79,8 @@ let inboxSyncInFlight = false;
 let inboxRefreshTimer = 0;
 let conversationRequestNumber = 0;
 let remoteConversationRequestNumber = 0;
+let attachmentObjectUrl = '';
+let attachmentFileName = '';
 
 function localSignInAuditMeta() {
   let timeZone = '';
@@ -340,106 +342,109 @@ function appendDetailRow(container, label, value) {
   container.appendChild(row);
 }
 
+function closeAttachmentViewer() {
+  if (attachmentObjectUrl) URL.revokeObjectURL(attachmentObjectUrl);
+  attachmentObjectUrl = '';
+  attachmentFileName = '';
+  const viewer = $('attachmentViewer');
+  if (!viewer) return;
+  viewer.classList.add('hidden');
+  $('attachmentViewerBody').textContent = '';
+  $('attachmentViewerStatus').textContent = '';
+  const downloadButton = $('attachmentViewerDownloadButton');
+  downloadButton.disabled = true;
+  downloadButton.textContent = 'Download file';
+}
+
+function showAttachmentViewer(name) {
+  closeAttachmentViewer();
+  attachmentFileName = name || 'received-file';
+  $('attachmentViewerTitle').textContent = attachmentFileName;
+  $('attachmentViewerStatus').textContent = 'Loading file…';
+  $('attachmentViewerBody').textContent = '';
+  $('attachmentViewer').classList.remove('hidden');
+}
+
+function decodeAttachmentResult(result, fallbackFile) {
+  const raw = String(result && result.base64 || '').replace(/\s/g, '');
+  if (!raw) throw new Error('The attachment contents were empty.');
+  const encoded = raw.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(raw.length / 4) * 4, '=');
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return {
+    bytes,
+    name: String(result && result.name || fallbackFile && fallbackFile.name || 'received-file'),
+    mimeType: String(result && result.mimeType || fallbackFile && fallbackFile.mimeType || 'application/octet-stream').toLowerCase(),
+  };
+}
+
+function renderAttachmentInPage(url, mimeType, name, bytes) {
+  const body = $('attachmentViewerBody');
+  body.textContent = '';
+  const status = $('attachmentViewerStatus');
+  let element;
+  if (/^image\//i.test(mimeType)) {
+    element = document.createElement('img');
+    element.src = url;
+    element.alt = name;
+    element.addEventListener('load', () => { status.textContent = 'Preview opened in this page.'; }, { once: true });
+  } else if (mimeType === 'application/pdf') {
+    element = document.createElement('iframe');
+    element.src = url;
+    element.title = name;
+    status.textContent = 'PDF opened in this page.';
+  } else if (/^video\//i.test(mimeType)) {
+    element = document.createElement('video');
+    element.src = url;
+    element.controls = true;
+    element.autoplay = false;
+    status.textContent = 'Video opened in this page.';
+  } else if (/^audio\//i.test(mimeType)) {
+    element = document.createElement('audio');
+    element.src = url;
+    element.controls = true;
+    status.textContent = 'Audio opened in this page.';
+  } else if (/^text\//i.test(mimeType) || mimeType === 'application/json' || mimeType === 'application/xml') {
+    element = document.createElement('pre');
+    element.textContent = new TextDecoder().decode(bytes);
+    status.textContent = 'Text opened in this page.';
+  } else {
+    element = document.createElement('iframe');
+    element.src = url;
+    element.title = name;
+    status.textContent = 'This file is being opened in this page. If your browser cannot preview this format, use Download file below.';
+  }
+  body.appendChild(element);
+}
+
+function downloadCurrentAttachment() {
+  if (!attachmentObjectUrl) return;
+  const link = document.createElement('a');
+  link.href = attachmentObjectUrl;
+  link.download = attachmentFileName || 'received-file';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function openReceivedAttachment(threadId, messageId, file, button) {
-  const declaredMimeType = String(file && file.mimeType || '').toLowerCase();
-  const previewable = /^image\//.test(declaredMimeType)
-    || declaredMimeType === 'application/pdf'
-    || /^text\//.test(declaredMimeType)
-    || declaredMimeType === 'application/json';
-  // Open synchronously from the click handler so iOS Safari does not block the
-  // preview tab while the private Apps Script request is still in flight.
-  const previewWindow = previewable ? window.open('about:blank', '_blank') : null;
+  showAttachmentViewer(file && file.name);
   setBusy(button, true, 'Opening…');
   authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
-    const encoded = String(result && result.base64 || '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(result && result.base64 || '').replace(/\s/g, '').length / 4) * 4, '=');
-    const binary = atob(encoded);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    const mimeType = String(result && result.mimeType || file.mimeType || 'application/octet-stream');
-    const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
-    const canPreview = /^image\//i.test(mimeType)
-      || /^text\//i.test(mimeType)
-      || mimeType.toLowerCase() === 'application/pdf'
-      || mimeType.toLowerCase() === 'application/json';
-    if (canPreview && renderAttachmentPreview(previewWindow, url, mimeType, result.name || file.name || 'Received file', bytes)) {
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
-      showAlert('File opened in a new tab.', 'success');
-      return;
-    }
-    if (previewWindow && !previewWindow.closed) previewWindow.close();
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = result.name || file.name || 'received-file';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showAlert('File downloaded.', 'success');
+    const attachment = decodeAttachmentResult(result, file);
+    attachmentObjectUrl = URL.createObjectURL(new Blob([attachment.bytes], { type: attachment.mimeType }));
+    attachmentFileName = attachment.name;
+    $('attachmentViewerTitle').textContent = attachmentFileName;
+    const downloadButton = $('attachmentViewerDownloadButton');
+    downloadButton.disabled = false;
+    renderAttachmentInPage(attachmentObjectUrl, attachment.mimeType, attachmentFileName, attachment.bytes);
+    showAlert('Attachment opened in this page.', 'success');
   }).catch((error) => {
-    if (previewWindow && !previewWindow.closed) previewWindow.close();
+    $('attachmentViewerStatus').textContent = 'The attachment could not be opened.';
+    $('attachmentViewerBody').textContent = messageText(error);
     showAlert(messageText(error));
   }).finally(() => setBusy(button, false));
-}
-
-function downloadReceivedAttachment(threadId, messageId, file, button) {
-  setBusy(button, true, 'Downloading…');
-  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
-    const encoded = String(result && result.base64 || '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(result && result.base64 || '').replace(/\s/g, '').length / 4) * 4, '=');
-    const binary = atob(encoded);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType || 'application/octet-stream' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = result.name || file.name || 'received-file';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showAlert('File downloaded.', 'success');
-  }).catch((error) => showAlert(messageText(error))).finally(() => setBusy(button, false));
-}
-
-function renderAttachmentPreview(previewWindow, url, mimeType, name, bytes) {
-  if (!previewWindow || previewWindow.closed) return false;
-  try {
-    // Navigate first so the real blob URL is not left as about:blank. Safari
-    // can occasionally keep the popup on about:blank, so render a same-origin
-    // fallback inside it when navigation does not take effect.
-    previewWindow.location.href = url;
-    if (previewWindow.location.href !== 'about:blank') {
-      previewWindow.focus();
-      return true;
-    }
-  } catch (ignored) {}
-  try {
-    const documentRef = previewWindow.document;
-    documentRef.title = name || 'Received file';
-    documentRef.body.textContent = '';
-    documentRef.body.style.margin = '0';
-    documentRef.body.style.background = '#111827';
-    let element;
-    if (/^image\//i.test(mimeType)) {
-      element = documentRef.createElement('img');
-      element.src = url;
-      element.alt = name || 'Received image';
-      element.style.cssText = 'display:block;max-width:100%;max-height:100vh;margin:auto;object-fit:contain;';
-    } else if (mimeType.toLowerCase() === 'application/pdf') {
-      element = documentRef.createElement('iframe');
-      element.src = url;
-      element.title = name || 'Received PDF';
-      element.style.cssText = 'display:block;width:100vw;height:100vh;border:0;background:#fff;';
-    } else {
-      element = documentRef.createElement('pre');
-      element.textContent = new TextDecoder().decode(bytes);
-      element.style.cssText = 'box-sizing:border-box;margin:0;padding:20px;min-height:100vh;color:#f9fafb;white-space:pre-wrap;overflow:auto;font:14px/1.5 ui-monospace,monospace;';
-    }
-    documentRef.body.appendChild(element);
-    previewWindow.focus();
-    return true;
-  } catch (ignored) {
-    return false;
-  }
 }
 
 function renderThread(thread) {
@@ -807,6 +812,14 @@ $('forwardForm').addEventListener('submit', async (event) => {
 $('composeOpenButton').addEventListener('click', openCompose);
 $('composeCloseButton').addEventListener('click', closeCompose);
 $('closeThreadButton').addEventListener('click', closeThread);
+$('attachmentViewerCloseButton').addEventListener('click', closeAttachmentViewer);
+$('attachmentViewerDownloadButton').addEventListener('click', downloadCurrentAttachment);
+$('attachmentViewer').addEventListener('click', (event) => {
+  if (event.target === $('attachmentViewer')) closeAttachmentViewer();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('attachmentViewer').classList.contains('hidden')) closeAttachmentViewer();
+});
 document.querySelectorAll('[data-folder]').forEach((button) => {
   button.addEventListener('click', () => setFolder(button.dataset.folder));
 });

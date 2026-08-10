@@ -257,6 +257,20 @@ button.secondary:disabled:active {
 .reply-box { display: grid; gap: 14px; margin-top: 17px; padding-top: 17px; border-top: 1px solid #e9ecef; }
 .reply-box h3 { margin-bottom: 4px; color: #2c3e50; }
 #portalBridge { position: fixed; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; left: -10px; bottom: -10px; }
+.attachment-viewer { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(17 24 39 / 72%); }
+.attachment-viewer.hidden { display: none; }
+.attachment-viewer-card { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(960px, 100%); height: min(760px, 100%); overflow: hidden; border: 1px solid #dfe3e8; border-radius: 16px; background: #fff; box-shadow: 0 24px 80px rgb(17 24 39 / 30%); }
+.attachment-viewer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 17px 20px 12px; border-bottom: 1px solid #e8ebef; }
+.attachment-viewer-header h2 { margin: 2px 0 0; overflow: hidden; color: #28323d; font-size: 1.05rem; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-viewer-status { margin: 0; padding: 10px 20px; color: #69737e; background: #f7f8fa; font-size: .78rem; }
+.attachment-viewer-body { display: grid; min-height: 0; place-items: center; overflow: auto; padding: 14px; background: #202733; }
+.attachment-viewer-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.attachment-viewer-body iframe, .attachment-viewer-body object { display: block; width: 100%; height: 100%; min-height: 430px; border: 0; background: #fff; }
+.attachment-viewer-body video { display: block; width: 100%; max-height: 100%; background: #000; }
+.attachment-viewer-body audio { width: min(620px, 100%); }
+.attachment-viewer-body pre { box-sizing: border-box; width: 100%; min-height: 100%; margin: 0; padding: 18px; overflow: auto; color: #f9fafb; white-space: pre-wrap; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.attachment-viewer-actions { display: flex; justify-content: flex-end; padding: 12px 20px 16px; border-top: 1px solid #e8ebef; background: #fff; }
+.attachment-viewer-actions button:disabled { cursor: not-allowed; opacity: .55; }
 
 @media (max-width: 600px) {
   body { padding: 10px; }
@@ -424,4 +438,11 @@ button.attachment-chip:hover { border-color: #aab5ff; background: #f7f8ff; }
   .message-date-block { grid-column: 2; display: flex; justify-content: flex-start; align-items: center; gap: 9px; margin-top: 2px; text-align: left; }
   .message-body, .message-details, .message-attachment-list, .message-actions { margin-left: 0; }
   .message-details { margin-top: 10px; }
+  .attachment-viewer { padding: 0; }
+  .attachment-viewer-card { width: 100%; height: 100%; border: 0; border-radius: 0; }
+  .attachment-viewer-header { padding: 14px; }
+  .attachment-viewer-status { padding: 9px 14px; }
+  .attachment-viewer-body { padding: 8px; }
+  .attachment-viewer-actions { padding: 10px 14px 14px; }
+  .attachment-viewer-actions button { width: 100%; }
 }

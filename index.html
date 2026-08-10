@@ -8,6 +8,17 @@
   </head>
   <body>
     <div id="alertContainer" aria-live="polite"></div>
+    <section id="attachmentViewer" class="attachment-viewer hidden" role="dialog" aria-modal="true" aria-labelledby="attachmentViewerTitle">
+      <div class="attachment-viewer-card">
+        <header class="attachment-viewer-header">
+          <div><p class="eyebrow">ATTACHMENT</p><h2 id="attachmentViewerTitle">File</h2></div>
+          <button id="attachmentViewerCloseButton" class="icon-button" type="button" aria-label="Close attachment viewer">×</button>
+        </header>
+        <p id="attachmentViewerStatus" class="attachment-viewer-status">Loading file…</p>
+        <div id="attachmentViewerBody" class="attachment-viewer-body"></div>
+        <div class="attachment-viewer-actions"><button id="attachmentViewerDownloadButton" class="button button-secondary" type="button" disabled>Download file</button></div>
+      </div>
+    </section>
     <main>
       <form id="loginForm" class="container">
         <h2>Sign in</h2>
@@ -80,6 +91,6 @@
         </div>
       </section>
     </main>
-    <script src="frontend.js?v=attachment-preview-fallback-20260810-v4"></script>
+    <script src="frontend.js?v=attachment-in-page-viewer-20260810-v5"></script>
   </body>
 </html>
