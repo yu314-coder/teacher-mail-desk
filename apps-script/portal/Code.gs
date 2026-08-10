@@ -1051,6 +1051,10 @@ function isInlinePart_(part, rootPayload) {
   if (/^inline\b/i.test(disposition)) return true;
   const contentId = mimeHeaderValue_(part, 'Content-ID').replace(/^<|>$/g, '').trim().toLowerCase();
   if (!contentId) return false;
+  // Mail clients commonly mark signature and branding images as attachments
+  // while still embedding them with cid:. A CID image is inline content, not
+  // a user-selected file, even when its MIME disposition is inconsistent.
+  if (/^image\//i.test(String(part && part.mimeType || ''))) return true;
   // Some Gmail clients label inline signature images as "attachment" but
   // reference them from the HTML/text body with cid:. Keep those images out
   // while allowing a genuine file that merely happens to have a Content-ID.
@@ -1128,6 +1132,18 @@ function standardBase64_(value) {
   return Utilities.base64Encode(decodeBase64Bytes_(value));
 }
 
+function attachmentDataForClient_(value) {
+  let raw = value;
+  if (raw && typeof raw === 'object' && raw.data != null) raw = raw.data;
+  raw = String(raw == null ? '' : raw).trim();
+  if (!raw) throw new Error('The attachment data was empty.');
+  raw = raw.replace(/^data:[^,]*;base64,/i, '');
+  if (/%[0-9a-f]{2}/i.test(raw)) {
+    try { raw = decodeURIComponent(raw); } catch (error) {}
+  }
+  return raw.replace(/\s/g, '').replace(/^['"]|['"]$/g, '');
+}
+
 function downloadAttachment(sessionToken, threadId, messageId, attachmentId, attachmentName) {
   const email = requireSession_(sessionToken);
   const id = cleanText_(threadId, 160);
@@ -1150,13 +1166,18 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId, att
     throw new Error('This file is hidden by the privacy filter.');
   }
   let data = part.body && part.body.data;
+  let bodySize = Number(part.body && part.body.size || 0);
   if (!data && part.body && part.body.attachmentId) {
     const attachment = Gmail.Users.Messages.Attachments.get('me', mid, part.body.attachmentId);
     data = attachment && attachment.data;
+    bodySize = Number(attachment && attachment.size || bodySize);
   }
   if (!data) throw new Error('The received file is not available.');
-  const base64 = standardBase64_(data);
-  const size = Math.floor(base64.length * 3 / 4);
+  // Gmail already returns this field as base64url. Keep it opaque here: the
+  // browser can normalize it, while Apps Script must not reject a valid Gmail
+  // payload merely because it uses a representation variant.
+  const base64 = attachmentDataForClient_(data);
+  const size = bodySize || Math.floor(base64.length * 3 / 4);
   if (size > PORTAL.maxAttachmentBytes) throw new Error('This file is larger than the portal download limit.');
   return { ok: true, name: safeDisplayText_(part.filename, 160), mimeType: safeDisplayText_(part.mimeType, 120) || 'application/octet-stream', size, base64 };
 }

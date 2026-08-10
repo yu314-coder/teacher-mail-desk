@@ -366,9 +366,18 @@ function showAttachmentViewer(name) {
 }
 
 function decodeAttachmentResult(result, fallbackFile) {
-  const raw = String(result && result.base64 || '').replace(/\s/g, '');
+  let raw = String(result && result.base64 || '').trim();
   if (!raw) throw new Error('The attachment contents were empty.');
-  const encoded = raw.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(raw.length / 4) * 4, '=');
+  raw = raw.replace(/^data:[^,]*;base64,/i, '');
+  if (/%[0-9a-f]{2}/i.test(raw)) {
+    try { raw = decodeURIComponent(raw); } catch (error) {}
+  }
+  raw = raw.replace(/\s/g, '').replace(/^['"]|['"]$/g, '');
+  const normalized = raw.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  if (!/^[A-Za-z0-9+/]+$/.test(normalized) || normalized.length % 4 === 1) {
+    throw new Error('Gmail returned an unreadable attachment payload.');
+  }
+  const encoded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
   const binary = atob(encoded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
