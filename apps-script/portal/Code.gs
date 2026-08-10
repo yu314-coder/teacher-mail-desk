@@ -1085,21 +1085,47 @@ function findAttachmentPart_(payload, attachmentId, name) {
   return null;
 }
 
-function standardBase64_(value) {
-  const raw = String(value || '').replace(/\s/g, '');
-  if (!raw) return '';
-  const normalized = raw.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
-  if (!/^[A-Za-z0-9+/]*$/.test(normalized)) throw new Error('The attachment data was not valid base64.');
-  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
-  try {
-    return Utilities.base64Encode(Utilities.base64Decode(padded));
-  } catch (firstError) {
-    try {
-      return Utilities.base64Encode(Utilities.base64DecodeWebSafe(padded));
-    } catch (ignored) {
-      throw new Error('The attachment data could not be decoded.');
-    }
+function base64Variants_(value) {
+  let raw = String(value == null ? '' : value).trim();
+  if (!raw) return [];
+  raw = raw.replace(/^data:[^,]*;base64,/i, '');
+  if (/%[0-9a-f]{2}/i.test(raw)) {
+    try { raw = decodeURIComponent(raw); } catch (error) {}
   }
+  raw = raw.replace(/\s/g, '').replace(/^['"]|['"]$/g, '');
+  const normalized = raw.replace(/-/g, '+').replace(/_/g, '/');
+  const variants = [
+    { value: normalized, webSafe: false },
+    { value: raw, webSafe: true },
+    { value: normalized, webSafe: true },
+  ];
+  const seen = {};
+  return variants.map((variant) => {
+    const unpadded = String(variant.value).replace(/=+$/, '');
+    if (!/^[A-Za-z0-9+/]*$/.test(unpadded) || !unpadded || unpadded.length % 4 === 1) return null;
+    const padded = unpadded + '='.repeat((4 - unpadded.length % 4) % 4);
+    const key = (variant.webSafe ? 'w:' : 's:') + padded;
+    if (seen[key]) return null;
+    seen[key] = true;
+    return { value: padded, webSafe: variant.webSafe };
+  }).filter(Boolean);
+}
+
+function decodeBase64Bytes_(value) {
+  const variants = base64Variants_(value);
+  for (const variant of variants) {
+    try {
+      return variant.webSafe
+        ? Utilities.base64DecodeWebSafe(variant.value)
+        : Utilities.base64Decode(variant.value);
+    } catch (error) {}
+  }
+  if (!variants.length) throw new Error('The attachment data was not valid base64.');
+  throw new Error('The attachment data could not be decoded.');
+}
+
+function standardBase64_(value) {
+  return Utilities.base64Encode(decodeBase64Bytes_(value));
 }
 
 function downloadAttachment(sessionToken, threadId, messageId, attachmentId, attachmentName) {
@@ -1270,12 +1296,7 @@ function hasAttachment_(payload, rootPayload) {
 }
 
 function decodeBase64Url_(value) {
-  try {
-    const base64 = standardBase64_(value);
-    return Utilities.newBlob(Utilities.base64Decode(base64)).getDataAsString('UTF-8');
-  } catch (error) {
-    return '';
-  }
+  try { return Utilities.newBlob(decodeBase64Bytes_(value)).getDataAsString('UTF-8'); } catch (error) { return ''; }
 }
 
 function stripHtml_(html) {
