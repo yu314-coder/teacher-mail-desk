@@ -1086,7 +1086,20 @@ function findAttachmentPart_(payload, attachmentId, name) {
 }
 
 function standardBase64_(value) {
-  return Utilities.base64Encode(Utilities.base64DecodeWebSafe(String(value || '')));
+  const raw = String(value || '').replace(/\s/g, '');
+  if (!raw) return '';
+  const normalized = raw.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  if (!/^[A-Za-z0-9+/]*$/.test(normalized)) throw new Error('The attachment data was not valid base64.');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  try {
+    return Utilities.base64Encode(Utilities.base64Decode(padded));
+  } catch (firstError) {
+    try {
+      return Utilities.base64Encode(Utilities.base64DecodeWebSafe(padded));
+    } catch (ignored) {
+      throw new Error('The attachment data could not be decoded.');
+    }
+  }
 }
 
 function downloadAttachment(sessionToken, threadId, messageId, attachmentId, attachmentName) {
@@ -1257,7 +1270,12 @@ function hasAttachment_(payload, rootPayload) {
 }
 
 function decodeBase64Url_(value) {
-  try { return Utilities.newBlob(Utilities.base64DecodeWebSafe(value)).getDataAsString('UTF-8'); } catch (error) { return ''; }
+  try {
+    const base64 = standardBase64_(value);
+    return Utilities.newBlob(Utilities.base64Decode(base64)).getDataAsString('UTF-8');
+  } catch (error) {
+    return '';
+  }
 }
 
 function stripHtml_(html) {
