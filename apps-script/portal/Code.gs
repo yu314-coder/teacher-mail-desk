@@ -713,7 +713,7 @@ function attachmentInputsFromMessage_(message) {
       if (hasFinancialPattern_(name + '\n' + mimeType)) throw new Error('This attachment is hidden by the privacy filter.');
       let data = part.body && part.body.data;
       if (!data && part.body && part.body.attachmentId) {
-        const attachment = Gmail.Users.Attachments.get('me', String(message.id), part.body.attachmentId);
+        const attachment = Gmail.Users.Messages.Attachments.get('me', String(message.id), part.body.attachmentId);
         data = attachment && attachment.data;
       }
       if (!data) throw new Error('One original attachment is not available for forwarding.');
@@ -1112,7 +1112,7 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId, att
   }
   let data = part.body && part.body.data;
   if (!data && part.body && part.body.attachmentId) {
-    const attachment = Gmail.Users.Attachments.get('me', mid, part.body.attachmentId);
+    const attachment = Gmail.Users.Messages.Attachments.get('me', mid, part.body.attachmentId);
     data = attachment && attachment.data;
   }
   if (!data) throw new Error('The received file is not available.');
