@@ -340,9 +340,51 @@ function appendDetailRow(container, label, value) {
   container.appendChild(row);
 }
 
+function openReceivedAttachment(threadId, messageId, file, button) {
+  const declaredMimeType = String(file && file.mimeType || '').toLowerCase();
+  const previewable = /^image\//.test(declaredMimeType)
+    || declaredMimeType === 'application/pdf'
+    || /^text\//.test(declaredMimeType)
+    || declaredMimeType === 'application/json';
+  // Open synchronously from the click handler so iOS Safari does not block the
+  // preview tab while the private Apps Script request is still in flight.
+  const previewWindow = previewable ? window.open('about:blank', '_blank') : null;
+  setBusy(button, true, 'Opening…');
+  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
+    const binary = atob(String(result && result.base64 || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const mimeType = String(result && result.mimeType || file.mimeType || 'application/octet-stream');
+    const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+    const canPreview = /^image\//i.test(mimeType)
+      || /^text\//i.test(mimeType)
+      || mimeType.toLowerCase() === 'application/pdf'
+      || mimeType.toLowerCase() === 'application/json';
+    if (canPreview && previewWindow && !previewWindow.closed) {
+      previewWindow.document.title = result.name || file.name || 'Received file';
+      previewWindow.location.replace(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      showAlert('File opened in a new tab.', 'success');
+      return;
+    }
+    if (previewWindow && !previewWindow.closed) previewWindow.close();
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.name || file.name || 'received-file';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showAlert('File downloaded.', 'success');
+  }).catch((error) => {
+    if (previewWindow && !previewWindow.closed) previewWindow.close();
+    showAlert(messageText(error));
+  }).finally(() => setBusy(button, false));
+}
+
 function downloadReceivedAttachment(threadId, messageId, file, button) {
   setBusy(button, true, 'Downloading…');
-  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId, file.name]).then((result) => {
+  authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
     const binary = atob(String(result && result.base64 || ''));
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -426,13 +468,14 @@ function renderThread(thread) {
         const attachments = document.createElement('div');
         attachments.className = 'message-attachment-list';
         message.attachments.forEach((file) => {
-          const chip = document.createElement(file.attachmentId ? 'button' : 'span');
+          // GmailApp-backed views may not expose an attachment ID. The
+          // backend also authorizes and resolves the file by its name, so keep
+          // the chip clickable for both metadata shapes.
+          const chip = document.createElement('button');
           chip.className = 'attachment-chip';
-          if (file.attachmentId) {
-            chip.type = 'button';
-            chip.title = 'Download received file';
-            chip.addEventListener('click', () => downloadReceivedAttachment(thread.threadId, message.id, file, chip));
-          }
+          chip.type = 'button';
+          chip.title = 'Open or download received file';
+          chip.addEventListener('click', () => openReceivedAttachment(thread.threadId, message.id, file, chip));
           chip.textContent = file.name + (file.size ? ' · ' + Math.ceil(file.size / 1024) + ' KB' : '');
           attachments.appendChild(chip);
         });
@@ -629,15 +672,25 @@ function handleSend(form, method, args, successMessage, buttonLabel) {
   const button = $({ sendMessage: 'composeButton', replyToThread: 'replyButton', forwardMessage: 'forwardButton' }[method]);
   setBusy(button, true, buttonLabel);
   showAlert('');
-  authenticatedRpc(method, args).then(() => {
+  authenticatedRpc(method, args).then((result) => {
     setBusy(button, false);
     if (form) form.reset();
     if (method === 'sendMessage') {
       closeCompose();
       setFolder('sent');
     }
+    const returnedThread = result && result.thread ? result.thread : null;
+    if (method === 'replyToThread' && returnedThread && returnedThread.threadId === selectedThreadId) {
+      const index = currentThreads.findIndex((item) => item.threadId === selectedThreadId);
+      if (index >= 0) currentThreads[index] = returnedThread;
+      renderThread(returnedThread);
+      updateFolderCounts();
+      // Refresh the fast list in the background without replacing the
+      // conversation that was just rendered from Gmail.
+      refreshInboxInBackground();
+    }
     showAlert(successMessage, 'success');
-    loadThreads();
+    if (method !== 'replyToThread' || !returnedThread) loadThreads();
   }).catch((error) => {
     setBusy(button, false);
     showAlert(messageText(error));

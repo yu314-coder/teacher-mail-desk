@@ -596,6 +596,7 @@ function sendMessage(sessionToken, to, subject, body, attachments) {
 function replyToThread(sessionToken, threadId, body, attachments) {
   const email = requireSession_(sessionToken);
   const allowed = allowedThreadMap_(email, sessionToken);
+  const allowedSenders = allowedSendersFor_(email, sessionToken);
   const id = cleanText_(threadId, 160);
   const record = allowed[id];
   if (!record) throw new Error('That conversation was not started through this portal.');
@@ -606,7 +607,7 @@ function replyToThread(sessionToken, threadId, body, attachments) {
 
   const thread = Gmail.Users.Threads.get('me', id, { format: 'full' });
   const inbound = latestInbound_(thread, email);
-  if (inbound && !allowedSendersFor_(email, sessionToken).has(addressFrom_(header_(inbound, 'From')))) {
+  if (inbound && !allowedSenders.has(addressFrom_(header_(inbound, 'From')))) {
     recordAudit_(email, sessionToken, 'reply', id, '', 'blocked', 'Inbound sender is not on AllowedSenders.');
     throw new Error('This sender is not on the AllowedSenders list.');
   }
@@ -631,7 +632,15 @@ function replyToThread(sessionToken, threadId, body, attachments) {
   recordMessageAudit_(email, sessionToken, 'sent', 'reply', id, sent && sent.id ? sent.id : '', email, recipient, replySubject, cleanBody, safeAttachments);
   forwardAuditCopy_(email, sessionToken, [recipient], replySubject, cleanBody, sent, safeAttachments);
   clearPortalMailboxCache_(email, sessionToken);
-  return { ok: true, sent: true };
+  // Return the just-updated Gmail conversation so the Pages UI can render the
+  // sent reply immediately, even if the Sheet logger is briefly cached or
+  // unavailable. The next mailbox refresh still persists the audit normally.
+  let threadView = null;
+  try {
+    const refreshed = Gmail.Users.Threads.get('me', id, { format: 'full' });
+    threadView = threadView_(refreshed, email, record, allowedSenders, { byMessageId: {}, byThreadId: {} });
+  } catch (ignored) {}
+  return { ok: true, sent: true, thread: threadView };
 }
 
 function forwardMessage(sessionToken, threadId, messageId, to, note, attachments) {
