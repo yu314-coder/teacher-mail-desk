@@ -1133,8 +1133,14 @@ function standardBase64_(value) {
 }
 
 function attachmentDataForClient_(value) {
+  if (Array.isArray(value)) return Utilities.base64Encode(value);
+  if (value && typeof value === 'object') {
+    if (value.data != null && value.data !== value) return attachmentDataForClient_(value.data);
+    if (value.base64 != null && value.base64 !== value) return attachmentDataForClient_(value.base64);
+    if (value.bytes != null && value.bytes !== value) return Utilities.base64Encode(value.bytes);
+    if (typeof value.getBytes === 'function') return Utilities.base64Encode(value.getBytes());
+  }
   let raw = value;
-  if (raw && typeof raw === 'object' && raw.data != null) raw = raw.data;
   raw = String(raw == null ? '' : raw).trim();
   if (!raw) throw new Error('The attachment data was empty.');
   raw = raw.replace(/^data:[^,]*;base64,/i, '');

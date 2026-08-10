@@ -366,7 +366,18 @@ function showAttachmentViewer(name) {
 }
 
 function decodeAttachmentResult(result, fallbackFile) {
-  let raw = String(result && result.base64 || '').trim();
+  const encodedValue = result && result.base64;
+  if (Array.isArray(encodedValue)) {
+    const bytes = Uint8Array.from(encodedValue, (value) => Number(value) & 255);
+    return {
+      bytes,
+      name: String(result && result.name || fallbackFile && fallbackFile.name || 'received-file'),
+      mimeType: String(result && result.mimeType || fallbackFile && fallbackFile.mimeType || 'application/octet-stream').toLowerCase(),
+    };
+  }
+  let rawValue = encodedValue;
+  if (rawValue && typeof rawValue === 'object') rawValue = rawValue.data ?? rawValue.base64 ?? rawValue.bytes;
+  let raw = String(rawValue || '').trim();
   if (!raw) throw new Error('The attachment contents were empty.');
   raw = raw.replace(/^data:[^,]*;base64,/i, '');
   if (/%[0-9a-f]{2}/i.test(raw)) {
