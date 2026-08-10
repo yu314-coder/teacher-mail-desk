@@ -704,9 +704,10 @@ function forwardMessage(sessionToken, threadId, messageId, to, note, attachments
 
 function attachmentInputsFromMessage_(message) {
   const result = [];
+  const rootPayload = message && message.payload;
   function collect(part) {
     if (!part) return;
-    if (part.filename) {
+    if (part.filename && !isInlinePart_(part, rootPayload)) {
       const name = safeDisplayText_(part.filename, 160);
       const mimeType = safeDisplayText_(part.mimeType, 120) || 'application/octet-stream';
       if (hasFinancialPattern_(name + '\n' + mimeType)) throw new Error('This attachment is hidden by the privacy filter.');
@@ -946,7 +947,7 @@ function messageView_(message, accountEmail, audit) {
   const subject = header_(message, 'Subject') || String(audit && audit.subject || '');
   const from = header_(message, 'From') || String(audit && audit.from || '');
   const date = header_(message, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : String(audit && audit.timestamp || ''));
-  const hasAttachment = hasAttachment_(message.payload);
+  const hasAttachment = hasAttachment_(message.payload, message.payload);
   let body = plainBody_(message.payload) || String(audit && audit.body || '');
   // A few multipart Gmail messages expose attachment metadata but omit the
   // decoded text in the Advanced Gmail payload. Ask GmailApp for the plain
@@ -1000,7 +1001,7 @@ function attachmentSummaries_(payload, audit, messageId) {
   const result = [];
   function collect(part) {
     if (!part) return;
-    if (part.filename && !isInlinePart_(part)) result.push({
+    if (part.filename && !isInlinePart_(part, payload)) result.push({
       name: safeDisplayText_(part.filename, 160),
       mimeType: safeDisplayText_(part.mimeType, 120),
       size: Number(part.body && part.body.size || 0),
@@ -1039,22 +1040,44 @@ function attachmentSummaries_(payload, audit, messageId) {
   return result.slice(0, 20);
 }
 
-function isInlinePart_(part) {
+function mimeHeaderValue_(part, name) {
   const headers = (part && part.headers) || [];
-  const getHeader = (name) => {
-    const match = headers.find((header) => String(header && header.name || '').toLowerCase() === name.toLowerCase());
-    return String(match && match.value || '');
-  };
-  const disposition = getHeader('Content-Disposition');
-  const contentId = getHeader('Content-ID');
-  return /^inline\b/i.test(disposition) || Boolean(contentId.trim());
+  const match = headers.find((header) => String(header && header.name || '').toLowerCase() === name.toLowerCase());
+  return String(match && match.value || '');
+}
+
+function isInlinePart_(part, rootPayload) {
+  const disposition = mimeHeaderValue_(part, 'Content-Disposition');
+  if (/^inline\b/i.test(disposition)) return true;
+  const contentId = mimeHeaderValue_(part, 'Content-ID').replace(/^<|>$/g, '').trim().toLowerCase();
+  if (!contentId) return false;
+  // Some Gmail clients label inline signature images as "attachment" but
+  // reference them from the HTML/text body with cid:. Keep those images out
+  // while allowing a genuine file that merely happens to have a Content-ID.
+  return payloadReferencesCid_(rootPayload || part, contentId);
+}
+
+function payloadReferencesCid_(payload, contentId) {
+  let found = false;
+  function scan(part) {
+    if (!part || found) return;
+    const mimeType = String(part.mimeType || '').toLowerCase();
+    if ((mimeType === 'text/plain' || mimeType === 'text/html') && part.body && part.body.data) {
+      const text = decodeBase64Url_(part.body.data).toLowerCase();
+      if (text.indexOf('cid:' + contentId) >= 0 || text.indexOf('cid:<' + contentId + '>') >= 0) found = true;
+    }
+    (part.parts || []).forEach(scan);
+  }
+  scan(payload);
+  return found;
 }
 
 function findAttachmentPart_(payload, attachmentId, name) {
   if (!payload) return null;
   const partId = String(payload.body && payload.body.attachmentId || '');
   const filename = String(payload.filename || '');
-  if ((attachmentId && partId === attachmentId) || (!attachmentId && name && filename === name)) return payload;
+  const sameName = !attachmentId && name && filename && filename.toLowerCase() === name.toLowerCase();
+  if ((attachmentId && partId === attachmentId) || sameName) return payload;
   for (const part of (payload.parts || [])) {
     const found = findAttachmentPart_(part, attachmentId, name);
     if (found) return found;
@@ -1083,7 +1106,7 @@ function downloadAttachment(sessionToken, threadId, messageId, attachmentId, att
   const body = plainBody_(message.payload);
   const part = findAttachmentPart_(message.payload, aid, '') || findAttachmentPart_(message.payload, '', name);
   if (!part) throw new Error('This received file is no longer available.');
-  if (isInlinePart_(part)) throw new Error('This image is part of the email design, not a downloadable attachment.');
+  if (isInlinePart_(part, message.payload)) throw new Error('This image is part of the email design, not a downloadable attachment.');
   if (hasFinancialPattern_(subject + '\n' + body + '\n' + part.filename + '\n' + part.mimeType)) {
     throw new Error('This file is hidden by the privacy filter.');
   }
@@ -1226,10 +1249,11 @@ function plainBody_(payload) {
   return '';
 }
 
-function hasAttachment_(payload) {
+function hasAttachment_(payload, rootPayload) {
   if (!payload) return false;
-  if (payload.filename && !isInlinePart_(payload)) return true;
-  return (payload.parts || []).some((part) => hasAttachment_(part));
+  const root = rootPayload || payload;
+  if (payload.filename && !isInlinePart_(payload, root)) return true;
+  return (payload.parts || []).some((part) => hasAttachment_(part, root));
 }
 
 function decodeBase64Url_(value) {

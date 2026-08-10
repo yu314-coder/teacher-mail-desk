@@ -351,7 +351,8 @@ function openReceivedAttachment(threadId, messageId, file, button) {
   const previewWindow = previewable ? window.open('about:blank', '_blank') : null;
   setBusy(button, true, 'Opening…');
   authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
-    const binary = atob(String(result && result.base64 || ''));
+    const encoded = String(result && result.base64 || '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(result && result.base64 || '').replace(/\s/g, '').length / 4) * 4, '=');
+    const binary = atob(encoded);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     const mimeType = String(result && result.mimeType || file.mimeType || 'application/octet-stream');
@@ -385,7 +386,8 @@ function openReceivedAttachment(threadId, messageId, file, button) {
 function downloadReceivedAttachment(threadId, messageId, file, button) {
   setBusy(button, true, 'Downloading…');
   authenticatedRpc('downloadAttachment', [threadId, messageId, file.attachmentId || '', file.name]).then((result) => {
-    const binary = atob(String(result && result.base64 || ''));
+    const encoded = String(result && result.base64 || '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(result && result.base64 || '').replace(/\s/g, '').length / 4) * 4, '=');
+    const binary = atob(encoded);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType || 'application/octet-stream' }));
